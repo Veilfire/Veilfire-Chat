@@ -179,7 +179,7 @@ docker compose down
 
 - More tools!
 - MCP Client
-- Embedding model use which will feed into...
+- Embedding model support which will feed into...
 - VectorDB integration for RAG capabilities
 
 ## License & Contributing
