@@ -23,6 +23,11 @@ Agentic multi-conversation AI chat app with tools, per-conversation scratchpad, 
   - User-editable System / Planner / Reflector prompts per conversation.
 - **Provider manager** for OpenRouter models, stored per-user in MongoDB.
 - **Logs viewer** with full request/response inspection.
+- **Privacy by design**:
+  - No cookies or other tracking.
+  - No data collection.
+  - All logging is local in MongoDB.
+  - The user must configure OpenRouter provider settings to enhance privacy. See https://openrouter.ai/settings/privacy for details.
 
 ## Local development (without Docker)
 

@@ -11,6 +11,10 @@ RUN npm ci
 FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 ENV NODE_ENV=production
+# Provide minimal Mongo env so Next.js server code that validates
+# MONGODB_URI can be compiled during `next build` without failing.
+ENV MONGODB_URI=mongodb://localhost:27017/veilfire_chat
+ENV MONGO_AUTH=FALSE
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
