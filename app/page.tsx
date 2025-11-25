@@ -132,8 +132,6 @@ export default function HomePage() {
     string | null
   >(null);
 
-  const [recentlyAddedModelIds, setRecentlyAddedModelIds] = useState<string[]>([]);
-
   const [modelSearch, setModelSearch] = useState("");
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [apiKeySaving, setApiKeySaving] = useState(false);
@@ -451,11 +449,6 @@ export default function HomePage() {
     activeConversation &&
     allModels.find((m) => m.id === activeConversation.settings.modelId);
 
-  const customModelIds = useMemo(
-    () => new Set((userSettings?.customModels ?? []).map((m) => m.id)),
-    [userSettings]
-  );
-
   const handleSaveApiKey = async () => {
     if (!apiKeyInput.trim() && !(userSettings?.hasApiKey ?? false)) {
       return;
@@ -530,16 +523,6 @@ export default function HomePage() {
       }
       const data = (await res.json()) as UserSettingsState;
       setUserSettings(data);
-      setRecentlyAddedModelIds((prev) =>
-        prev.includes(model.id) ? prev : [...prev, model.id]
-      );
-      if (typeof window !== "undefined") {
-        void window.setTimeout(() => {
-          setRecentlyAddedModelIds((prev) =>
-            prev.filter((id) => id !== model.id)
-          );
-        }, 700);
-      }
     } catch {
       setUserSettingsError("Failed to add model to your list.");
     }
@@ -1018,8 +1001,8 @@ export default function HomePage() {
         }
         void loadScratchpadForConversation(convToPersist.id);
       }
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name === "AbortError") {
+    } catch (err) {
+      if ((err as any)?.name === "AbortError") {
         let abortedConv: Conversation | null = null;
 
         setConversations((prev) =>
@@ -1427,7 +1410,7 @@ export default function HomePage() {
                     }`}
                   >
                     <div
-                      className={`max-w-[70%] min-w-[12%] rounded-lg px-3 py-2 whitespace-pre-wrap ${
+                      className={`relative max-w-[70%] min-w-[12%] rounded-lg px-3 py-2 whitespace-pre-wrap ${
                         m.role === "user"
                           ? "bg-sky-600 text-white"
                           : m.role === "assistant"
@@ -1503,70 +1486,83 @@ export default function HomePage() {
                         </div>
                       </div>
                       {m.role === "assistant" ? (
-                        isThinkingBubble ? (
-                          <div className="flex flex-col gap-1 text-[12px] text-slate-200">
-                            <div className="flex items-center gap-2">
-                              <span className="inline-flex items-center gap-1">
-                                <span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce [animation-duration:700ms]" />
-                                <span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce [animation-delay:120ms] [animation-duration:700ms]" />
-                                <span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce [animation-delay:240ms] [animation-duration:700ms]" />
-                              </span>
-                              <span>
-                                Thinking...
-                                {" "}
+                        <>
+                          {m.id === currentAssistantMessageId &&
+                            toolsUsedThisRun.length > 0 && (
+                              <div className="absolute align-right top-2 right-10 text-[10px] text-emerald-300 animate-pulse">
                                 {(() => {
-                                  const totalMs = Math.max(0, thinkingElapsedMs);
-                                  const seconds = Math.floor(totalMs / 1000)
-                                    .toString()
-                                    .padStart(2, "0");
-                                  const ms = (totalMs % 1000)
-                                    .toString()
-                                    .padStart(3, "0");
-                                  return `(${seconds}.${ms})`;
+                                  const primary = toolsUsedThisRun[0];
+                                  if (!primary) return null;
+                                  const emoji =
+                                    primary === "scratchpad"
+                                      ? "📝"
+                                      : primary === "get_utc_time"
+                                      ? "🕒"
+                                      : "🛠️";
+                                  return `tool called ${emoji} : ${primary}`;
                                 })()}
-                              </span>
-                            </div>
-                            {toolsUsedThisRun.length > 0 && (
-                              <div className="text-[10px] text-slate-400">
-                                Tool call: {toolsUsedThisRun.join(", ")}
                               </div>
                             )}
-                          </div>
-                        ) : (
-                          <div className="whitespace-normal">
-                            <ReactMarkdown
-                              components={{
-                                p: (props) => (
-                                  <p
-                                    className="mb-0 leading-snug"
-                                    {...props}
-                                  />
-                                ),
-                                strong: (props) => (
-                                  <strong
-                                    className="font-semibold"
-                                    {...props}
-                                  />
-                                ),
-                                em: (props) => <em className="italic" {...props} />,
-                                ul: (props) => (
-                                  <ul
-                                    className="list-disc ml-4 mb-1"
-                                    {...props}
-                                  />
-                                ),
-                                ol: (props) => (
-                                  <ol
-                                    className="list-decimal ml-4 mb-1"
-                                    {...props}
-                                  />
-                                ),
-                              }}
-                            >
-                              {m.content}
-                            </ReactMarkdown>
-                          </div>
-                        )
+                          {isThinkingBubble ? (
+                            <div className="flex flex-col gap-1 text-[12px] text-slate-200">
+                              <div className="flex items-center gap-2">
+                                <span className="inline-flex items-center gap-1">
+                                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce [animation-duration:700ms]" />
+                                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce [animation-delay:120ms] [animation-duration:700ms]" />
+                                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce [animation-delay:240ms] [animation-duration:700ms]" />
+                                </span>
+                                <span>
+                                  Thinking...
+                                  {" "}
+                                  {(() => {
+                                    const totalMs = Math.max(0, thinkingElapsedMs);
+                                    const seconds = Math.floor(totalMs / 1000)
+                                      .toString()
+                                      .padStart(2, "0");
+                                    const ms = (totalMs % 1000)
+                                      .toString()
+                                      .padStart(3, "0");
+                                    return `(${seconds}.${ms})`;
+                                  })()}
+                                </span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="whitespace-normal">
+                              <ReactMarkdown
+                                components={{
+                                  p: (props) => (
+                                    <p
+                                      className="mb-0 leading-snug"
+                                      {...props}
+                                    />
+                                  ),
+                                  strong: (props) => (
+                                    <strong
+                                      className="font-semibold"
+                                      {...props}
+                                    />
+                                  ),
+                                  em: (props) => <em className="italic" {...props} />,
+                                  ul: (props) => (
+                                    <ul
+                                      className="list-disc ml-4 mb-1"
+                                      {...props}
+                                    />
+                                  ),
+                                  ol: (props) => (
+                                    <ol
+                                      className="list-decimal ml-4 mb-1"
+                                      {...props}
+                                    />
+                                  ),
+                                }}
+                              >
+                                {m.content}
+                              </ReactMarkdown>
+                            </div>
+                          )}
+                        </>
                       ) : (
                         m.content
                       )}
@@ -2243,12 +2239,6 @@ export default function HomePage() {
                 <div className="mt-2 min-h-[32lh] max-h-[42lh] overflow-y-hidden overflow-y-scroll space-y-1 border border-slate-800 rounded-md p-2 bg-slate-950/60">
                   {openRouterModels
                     .filter((m) => {
-                      if (
-                        customModelIds.has(m.id) &&
-                        !recentlyAddedModelIds.includes(m.id)
-                      ) {
-                        return false;
-                      }
                       const q = modelSearch.trim().toLowerCase();
                       if (!q) return true;
                       const haystack = `${m.label} ${m.id} ${
@@ -2257,42 +2247,30 @@ export default function HomePage() {
                       return haystack.includes(q);
                     })
                     .slice(0, 50)
-                    .map((m) => {
-                      const isRecentlyAdded = recentlyAddedModelIds.includes(
-                        m.id
-                      );
-                      return (
-                        <div
-                          key={m.id}
-                          className={`flex items-center justify-between gap-2 transition-opacity duration-500 ${
-                            isRecentlyAdded ? "opacity-0" : "opacity-100"
-                          }`}
-                        >
-                          <div>
-                            <div className="text-[11px] font-medium">
-                              {m.label}
-                            </div>
-                            <div className="text-[10px] text-slate-500">
-                              {m.provider ?? "provider"} • {m.id}
-                              {m.contextWindow
-                                ? ` • ${m.contextWindow.toLocaleString()} tokens`
-                                : ""}
-                            </div>
+                    .map((m) => (
+                      <div
+                        key={m.id}
+                        className="flex items-center justify-between gap-2"
+                      >
+                        <div>
+                          <div className="text-[11px] font-medium">
+                            {m.label}
                           </div>
-                          <button
-                            onClick={() => void handleAddCustomModel(m)}
-                            className={`text-[10px] px-2 py-0.5 rounded-md border border-slate-700 hover:bg-slate-800 ${
-                              isRecentlyAdded
-                                ? "text-green-400 border-green-500 hover:bg-transparent"
-                                : ""
-                            }`}
-                            disabled={isRecentlyAdded}
-                          >
-                            {isRecentlyAdded ? "✓" : "Add"}
-                          </button>
+                          <div className="text-[10px] text-slate-500">
+                            {m.provider ?? "provider"} • {m.id}
+                            {m.contextWindow
+                              ? ` • ${m.contextWindow.toLocaleString()} tokens`
+                              : ""}
+                          </div>
                         </div>
-                      );
-                    })}
+                        <button
+                          onClick={() => void handleAddCustomModel(m)}
+                          className="text-[10px] px-2 py-0.5 rounded-md border border-slate-700 hover:bg-slate-800"
+                        >
+                          Add
+                        </button>
+                      </div>
+                    ))}
                   {!openRouterModelsLoading && openRouterModels.length === 0 && (
                     <div className="text-[11px] text-slate-500">
                       No models loaded yet. Ensure an OpenRouter API key is
