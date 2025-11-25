@@ -132,6 +132,8 @@ export default function HomePage() {
     string | null
   >(null);
 
+  const [recentlyAddedModelIds, setRecentlyAddedModelIds] = useState<string[]>([]);
+
   const [modelSearch, setModelSearch] = useState("");
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [apiKeySaving, setApiKeySaving] = useState(false);
@@ -449,6 +451,11 @@ export default function HomePage() {
     activeConversation &&
     allModels.find((m) => m.id === activeConversation.settings.modelId);
 
+  const customModelIds = useMemo(
+    () => new Set((userSettings?.customModels ?? []).map((m) => m.id)),
+    [userSettings]
+  );
+
   const handleSaveApiKey = async () => {
     if (!apiKeyInput.trim() && !(userSettings?.hasApiKey ?? false)) {
       return;
@@ -523,6 +530,16 @@ export default function HomePage() {
       }
       const data = (await res.json()) as UserSettingsState;
       setUserSettings(data);
+      setRecentlyAddedModelIds((prev) =>
+        prev.includes(model.id) ? prev : [...prev, model.id]
+      );
+      if (typeof window !== "undefined") {
+        void window.setTimeout(() => {
+          setRecentlyAddedModelIds((prev) =>
+            prev.filter((id) => id !== model.id)
+          );
+        }, 700);
+      }
     } catch {
       setUserSettingsError("Failed to add model to your list.");
     }
@@ -2226,6 +2243,12 @@ export default function HomePage() {
                 <div className="mt-2 min-h-[32lh] max-h-[42lh] overflow-y-hidden overflow-y-scroll space-y-1 border border-slate-800 rounded-md p-2 bg-slate-950/60">
                   {openRouterModels
                     .filter((m) => {
+                      if (
+                        customModelIds.has(m.id) &&
+                        !recentlyAddedModelIds.includes(m.id)
+                      ) {
+                        return false;
+                      }
                       const q = modelSearch.trim().toLowerCase();
                       if (!q) return true;
                       const haystack = `${m.label} ${m.id} ${
@@ -2234,30 +2257,42 @@ export default function HomePage() {
                       return haystack.includes(q);
                     })
                     .slice(0, 50)
-                    .map((m) => (
-                      <div
-                        key={m.id}
-                        className="flex items-center justify-between gap-2"
-                      >
-                        <div>
-                          <div className="text-[11px] font-medium">
-                            {m.label}
-                          </div>
-                          <div className="text-[10px] text-slate-500">
-                            {m.provider ?? "provider"} • {m.id}
-                            {m.contextWindow
-                              ? ` • ${m.contextWindow.toLocaleString()} tokens`
-                              : ""}
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => void handleAddCustomModel(m)}
-                          className="text-[10px] px-2 py-0.5 rounded-md border border-slate-700 hover:bg-slate-800"
+                    .map((m) => {
+                      const isRecentlyAdded = recentlyAddedModelIds.includes(
+                        m.id
+                      );
+                      return (
+                        <div
+                          key={m.id}
+                          className={`flex items-center justify-between gap-2 transition-opacity duration-500 ${
+                            isRecentlyAdded ? "opacity-0" : "opacity-100"
+                          }`}
                         >
-                          Add
-                        </button>
-                      </div>
-                    ))}
+                          <div>
+                            <div className="text-[11px] font-medium">
+                              {m.label}
+                            </div>
+                            <div className="text-[10px] text-slate-500">
+                              {m.provider ?? "provider"} • {m.id}
+                              {m.contextWindow
+                                ? ` • ${m.contextWindow.toLocaleString()} tokens`
+                                : ""}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => void handleAddCustomModel(m)}
+                            className={`text-[10px] px-2 py-0.5 rounded-md border border-slate-700 hover:bg-slate-800 ${
+                              isRecentlyAdded
+                                ? "text-green-400 border-green-500 hover:bg-transparent"
+                                : ""
+                            }`}
+                            disabled={isRecentlyAdded}
+                          >
+                            {isRecentlyAdded ? "✓" : "Add"}
+                          </button>
+                        </div>
+                      );
+                    })}
                   {!openRouterModelsLoading && openRouterModels.length === 0 && (
                     <div className="text-[11px] text-slate-500">
                       No models loaded yet. Ensure an OpenRouter API key is
