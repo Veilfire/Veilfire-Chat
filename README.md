@@ -182,3 +182,7 @@ docker compose down
   under the same Apache-2.0 license as this project. See `CONTRIBUTING.md` for details.
 - Use of the Veilfire name and logo is governed by the trademark guidelines in
   `TRADEMARKS.md`. 
+
+Made in Canada 🇨🇦
+
+https://veilfire.io
