@@ -40,6 +40,10 @@ interface ChatRequestBody {
 
 const SCRATCHPAD_COLLECTION = "scratchpads";
 
+type OpenAIChatMessageParam = OpenAI.ChatCompletionMessageParam;
+type OpenAIToolMessageParam = OpenAI.ChatCompletionToolMessageParam;
+type OpenAIAssistantMessageParam = OpenAI.ChatCompletionAssistantMessageParam;
+
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   const user = session?.user as { id?: string } | null;
@@ -192,7 +196,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  async function runScratchpadFunction(name: string, args: any): Promise<any> {
+  async function runScratchpadFunction(
+    name: string,
+    args: Record<string, unknown>
+  ): Promise<unknown> {
     switch (name) {
       case "get_scratchpad": {
         const content = await getScratchpadForConversation();
@@ -214,12 +221,12 @@ export async function POST(req: NextRequest) {
               error: `Failed to fetch time from timeapi.io: ${res.status}`,
             };
           }
-          const data = (await res.json()) as any;
+          const data = await res.json();
           return {
             provider: "timeapi.io",
             payload: data,
           };
-        } catch (err: any) {
+        } catch {
           return {
             error: "Exception while calling timeapi.io",
           };
@@ -276,7 +283,7 @@ export async function POST(req: NextRequest) {
 
   // Run tool-calling manually (non-streaming from OpenAI), then
   // stream the final text back to the client as plain text.
-  let currentMessages = [...openaiMessages];
+  let currentMessages: OpenAIChatMessageParam[] = [...openaiMessages];
   let finalContent = "";
 
   // Track which tools are used in this run so the client can
@@ -287,14 +294,14 @@ export async function POST(req: NextRequest) {
   for (let step = 0; step < 6; step++) {
     const completion = await openai.chat.completions.create({
       model: modelId,
-      messages: currentMessages as any,
+      messages: currentMessages,
       temperature,
       tools,
       tool_choice: "auto",
     });
 
     const choice = completion.choices[0];
-    const msg = choice.message as any;
+    const msg = choice.message;
 
     if (!msg) break;
 
@@ -302,11 +309,11 @@ export async function POST(req: NextRequest) {
     if (msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
       const toolCalls = msg.tool_calls;
 
-      const toolResults: any[] = [];
+      const toolResults: OpenAIToolMessageParam[] = [];
       for (const toolCall of toolCalls) {
         const name = toolCall.function?.name as string;
         const rawArgs = toolCall.function?.arguments as string | undefined;
-        let parsed: any = {};
+        let parsed: Record<string, unknown> = {};
         try {
           parsed = rawArgs && rawArgs.trim() ? JSON.parse(rawArgs) : {};
         } catch {
@@ -324,14 +331,19 @@ export async function POST(req: NextRequest) {
         toolResults.push({
           role: "tool",
           tool_call_id: toolCall.id,
-          name,
           content: JSON.stringify(result),
-        } as any);
+        });
       }
+
+      const assistantToolCallMessage: OpenAIAssistantMessageParam = {
+        role: "assistant",
+        content: null,
+        tool_calls: toolCalls,
+      };
 
       currentMessages = [
         ...currentMessages,
-        { role: "assistant", tool_calls: toolCalls } as any,
+        assistantToolCallMessage,
         ...toolResults,
       ];
 
@@ -341,7 +353,7 @@ export async function POST(req: NextRequest) {
     // Legacy function_call path for older models that still use it.
     if (msg.function_call) {
       const { name, arguments: rawArgs } = msg.function_call;
-      let parsed: any = {};
+      let parsed: Record<string, unknown> = {};
       try {
         parsed =
           typeof rawArgs === "string" && rawArgs.trim()
@@ -359,14 +371,22 @@ export async function POST(req: NextRequest) {
         toolsUsedForThisRun.add(name);
       }
 
+      const assistantFunctionMessage: OpenAIAssistantMessageParam = {
+        role: "assistant",
+        content: null,
+        function_call: msg.function_call,
+      };
+
+      const functionResultMessage: OpenAIChatMessageParam = {
+        role: "function",
+        name,
+        content: JSON.stringify(result),
+      };
+
       currentMessages = [
         ...currentMessages,
-        { role: "assistant", content: null, function_call: msg.function_call } as any,
-        {
-          role: "function",
-          name,
-          content: JSON.stringify(result),
-        } as any,
+        assistantFunctionMessage,
+        functionResultMessage,
       ];
 
       continue;
@@ -376,7 +396,10 @@ export async function POST(req: NextRequest) {
     finalContent += content;
     currentMessages = [
       ...currentMessages,
-      { role: "assistant", content } as any,
+      {
+        role: "assistant",
+        content,
+      },
     ];
     break;
   }

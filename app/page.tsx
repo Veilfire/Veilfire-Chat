@@ -1001,8 +1001,8 @@ export default function HomePage() {
         }
         void loadScratchpadForConversation(convToPersist.id);
       }
-    } catch (err) {
-      if ((err as any)?.name === "AbortError") {
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") {
         let abortedConv: Conversation | null = null;
 
         setConversations((prev) =>
