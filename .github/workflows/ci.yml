@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-smoke-test:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: 1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build Next.js app
+        env:
+          # Minimal env so server code that validates Mongo env can compile
+          MONGODB_URI: mongodb://localhost:27017/ci_dummy
+          MONGO_AUTH: "FALSE"
+        run: npm run build
+
+      - name: Build Docker image
+        run: docker build -t veilfire-chat:ci .
+
+      - name: Prepare .env for docker compose
+        run: |
+          cat > .env <<'EOF'
+          OPENROUTER_API_KEY=dummy-key-for-ci
+          NEXTAUTH_SECRET=dummy-nextauth-secret
+          EOF
+
+      - name: Start docker-compose stack
+        run: |
+          docker compose up -d
+          # Give containers a bit of time to start
+          sleep 20
+          docker compose ps
+
+      - name: Shutdown docker-compose stack
+        if: always()
+        run: docker compose down -v
