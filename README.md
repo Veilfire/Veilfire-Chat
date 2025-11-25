@@ -181,4 +181,4 @@ docker compose down
 - By submitting a pull request, you agree that your contributions are licensed
   under the same Apache-2.0 license as this project. See `CONTRIBUTING.md` for details.
 - Use of the Veilfire name and logo is governed by the trademark guidelines in
-  `TRADEMARKS.md`.
+  `TRADEMARKS.md`. 
