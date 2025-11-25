@@ -175,6 +175,13 @@ To stop the stack:
 docker compose down
 ```
 
+## Coming soon
+
+- More tools!
+- MCP Client
+- Embedding model use which will feed into...
+- VectorDB integration for RAG capabilities
+
 ## License & Contributing
 
 - Source code is licensed under the Apache License 2.0. See `LICENSE.md` for full terms.
