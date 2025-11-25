@@ -54,4 +54,4 @@ jobs:
 
       - name: Shutdown docker-compose stack
         if: always()
-        run: docker compose down -v
+        run: docker compose down
