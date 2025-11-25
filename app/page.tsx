@@ -99,6 +99,24 @@ export default function HomePage() {
 
   const [showConfigModal, setShowConfigModal] = useState(false);
 
+  const [scratchpad, setScratchpad] = useState<string>("");
+  const [scratchpadVisible, setScratchpadVisible] = useState(false);
+
+  const [scratchpadWidgetPos, setScratchpadWidgetPos] = useState<
+    { x: number; y: number } | null
+  >(null);
+
+  const [scratchpadWidgetPulse, setScratchpadWidgetPulse] = useState(false);
+
+  const [scratchpadWidgetEnabled, setScratchpadWidgetEnabled] = useState(false);
+
+  const [toolsUsedThisRun, setToolsUsedThisRun] = useState<string[]>([]);
+  const [currentAssistantMessageId, setCurrentAssistantMessageId] = useState<
+    string | null
+  >(null);
+
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   const [userSettings, setUserSettings] = useState<UserSettingsState | null>(
     null
   );
@@ -122,6 +140,48 @@ export default function HomePage() {
     if (typeof window === "undefined") return;
     setPresets(loadPresets());
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem("vf-scratchpad-widget-pos");
+      if (raw) {
+        const parsed = JSON.parse(raw) as { x: number; y: number };
+        if (
+          parsed &&
+          typeof parsed.x === "number" &&
+          typeof parsed.y === "number"
+        ) {
+          setScratchpadWidgetPos(parsed);
+          return;
+        }
+      }
+    } catch {
+    }
+    const width = window.innerWidth || 0;
+    const height = window.innerHeight || 0;
+    const iconSize = 40;
+    const margin = 24;
+    const inputRegionHeight = 220; // approximate chat input bar height
+    const defaultX =
+      width > 0 ? width - iconSize - margin : 0;
+    const defaultY =
+      height > 0
+        ? Math.max(margin, height - inputRegionHeight - iconSize - margin)
+        : 0;
+    setScratchpadWidgetPos({ x: defaultX, y: defaultY });
+  }, []);
+
+  useEffect(() => {
+    if (!scratchpadWidgetPulse) return;
+    if (typeof window === "undefined") return;
+    const id = window.setTimeout(() => {
+      setScratchpadWidgetPulse(false);
+    }, 1200);
+    return () => {
+      window.clearTimeout(id);
+    };
+  }, [scratchpadWidgetPulse]);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -171,6 +231,16 @@ export default function HomePage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({}),
           });
+
+          const toolsHeader =
+            resNew.headers.get("x-tools-used") || resNew.headers.get("X-Tools-Used");
+          if (toolsHeader) {
+            const runTools = toolsHeader
+              .split(",")
+              .map((t) => t.trim())
+              .filter(Boolean);
+            setToolsUsedThisRun(runTools);
+          }
           if (resNew.ok) {
             const conv = (await resNew.json()) as Conversation;
             if (!cancelled) {
@@ -602,11 +672,47 @@ export default function HomePage() {
     []
   );
 
+  const loadScratchpadForConversation = useCallback(
+    async (conversationId: string) => {
+      try {
+        const res = await fetch(
+          `/api/scratchpad?conversationId=${encodeURIComponent(conversationId)}`
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as { content?: string | null };
+        const content = (data.content ?? "") || "";
+        setScratchpad(content);
+        setScratchpadWidgetEnabled((prev) => {
+          const next = prev || Boolean(content);
+          if (!prev && next) {
+            setScratchpadWidgetPulse(true);
+          }
+          return next;
+        });
+        if (!content) {
+          setScratchpadVisible(false);
+        }
+      } catch {
+      }
+    },
+    []
+  );
+
   useEffect(() => {
     if (showLogsPanel && activeConversation) {
       void loadLogsForConversation(activeConversation.id);
     }
   }, [showLogsPanel, activeConversation, loadLogsForConversation]);
+
+  useEffect(() => {
+    if (!activeConversation) {
+      setScratchpad("");
+      setScratchpadVisible(false);
+      setScratchpadWidgetEnabled(false);
+      return;
+    }
+    void loadScratchpadForConversation(activeConversation.id);
+  }, [activeConversation, loadScratchpadForConversation]);
 
   const updateScrollFlags = useCallback(() => {
     const update = (
@@ -673,8 +779,74 @@ export default function HomePage() {
     window.addEventListener("mouseup", onUp);
   };
 
+  const handleScratchpadWidgetDragStart = (
+    e: React.MouseEvent<HTMLButtonElement>
+  ) => {
+    if (typeof window === "undefined") return;
+    if (!scratchpadWidgetPos) {
+      const width = window.innerWidth || 0;
+      const height = window.innerHeight || 0;
+      const iconSize = 40;
+      const margin = 24;
+      const inputRegionHeight = 220;
+      const defaultX =
+        width > 0 ? width - iconSize - margin : 0;
+      const defaultY =
+        height > 0
+          ? Math.max(margin, height - inputRegionHeight - iconSize - margin)
+          : 0;
+      setScratchpadWidgetPos({ x: defaultX, y: defaultY });
+    }
+    e.preventDefault();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const base =
+      scratchpadWidgetPos ?? {
+        x: (window.innerWidth || 0) - 120,
+        y: (window.innerHeight || 0) - 140,
+      };
+    let lastX = base.x;
+    let lastY = base.y;
+    const onMove = (event: MouseEvent) => {
+      const dx = event.clientX - startX;
+      const dy = event.clientY - startY;
+      const width = window.innerWidth || 0;
+      const height = window.innerHeight || 0;
+      const margin = 24;
+      const iconSize = 40;
+      let nextX = base.x + dx;
+      let nextY = base.y + dy;
+      if (nextX < margin) nextX = margin;
+      if (nextY < margin) nextY = margin;
+      if (nextX > width - iconSize - margin) {
+        nextX = width - iconSize - margin;
+      }
+      if (nextY > height - iconSize - margin) {
+        nextY = height - iconSize - margin;
+      }
+      lastX = nextX;
+      lastY = nextY;
+      setScratchpadWidgetPos({ x: nextX, y: nextY });
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      try {
+        window.localStorage.setItem(
+          "vf-scratchpad-widget-pos",
+          JSON.stringify({ x: lastX, y: lastY })
+        );
+      } catch {
+      }
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
   const sendMessage = useCallback(async () => {
     if (!activeConversation || !input.trim() || isSending) return;
+
+    setToolsUsedThisRun([]);
 
     const userMessage: ChatMessage = {
       id: uuid(),
@@ -729,6 +901,8 @@ export default function HomePage() {
       createdAt: Date.now(),
     };
 
+    setCurrentAssistantMessageId(assistantMessage.id);
+
     const convWithAssistantPlaceholder: Conversation = {
       ...convWithUser,
       messages: [...convWithUser.messages, assistantMessage],
@@ -743,6 +917,9 @@ export default function HomePage() {
 
     let accumulated = "";
 
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -756,7 +933,22 @@ export default function HomePage() {
           contextConfig: convWithUser.settings.context,
           temperature: convWithUser.settings.temperature,
         }),
+        signal: controller.signal,
       });
+
+      const toolsHeader =
+        res.headers.get("x-tools-used") || res.headers.get("X-Tools-Used");
+      if (toolsHeader) {
+        const runTools = toolsHeader
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean);
+        setToolsUsedThisRun(runTools);
+        if (runTools.includes("scratchpad")) {
+          setScratchpadWidgetEnabled(true);
+          setScratchpadWidgetPulse(true);
+        }
+      }
 
       if (!res.body) {
         throw new Error("No response body");
@@ -804,12 +996,37 @@ export default function HomePage() {
         const convToPersist: Conversation = finalConv;
         void persistConversation(convToPersist);
 
-        // If logs panel is open, refresh logs for this conversation
         if (showLogsPanel) {
           void loadLogsForConversation(convToPersist.id);
         }
+        void loadScratchpadForConversation(convToPersist.id);
       }
     } catch (err) {
+      if ((err as any)?.name === "AbortError") {
+        let abortedConv: Conversation | null = null;
+
+        setConversations((prev) =>
+          prev.map((c) => {
+            if (c.id !== convWithAssistantPlaceholder.id) return c;
+            abortedConv = {
+              ...c,
+              updatedAt: Date.now(),
+            };
+            return abortedConv;
+          })
+        );
+
+        if (abortedConv) {
+          const convToPersist: Conversation = abortedConv;
+          void persistConversation(convToPersist);
+          if (showLogsPanel) {
+            void loadLogsForConversation(convToPersist.id);
+          }
+        }
+
+        return;
+      }
+
       console.error(err);
       const errorText =
         accumulated ||
@@ -830,6 +1047,7 @@ export default function HomePage() {
 
       void persistConversation(errorConv);
     } finally {
+      abortControllerRef.current = null;
       setIsSending(false);
     }
   }, [
@@ -840,7 +1058,14 @@ export default function HomePage() {
     persistConversation,
     showLogsPanel,
     loadLogsForConversation,
+    loadScratchpadForConversation,
   ]);
+
+  const handleCancelRequest = useCallback(() => {
+    const controller = abortControllerRef.current;
+    if (!controller) return;
+    controller.abort();
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter") {
@@ -924,88 +1149,88 @@ export default function HomePage() {
 
   const selectedLog = logs.find((l) => l.id === selectedLogId) ?? null;
 
-return (
-  <div className="h-screen flex bg-slate-950 text-slate-100 overflow-hidden">
-    {/* Sidebar: conversations + settings */}
-    <aside className="w-64 border-r border-slate-800 bg-slate-950/80 flex flex-col min-h-0">
-      <div className="p-3 border-b border-slate-800 flex items-center justify-between gap-2">
-        <div>
-          <div className="text-sm font-semibold truncate">{displayName}</div>
-          <div className="text-xs text-slate-500">Veilfire Chat</div>
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setShowLogsPanel((prev) => !prev)}
-            className="text-xs px-2 py-1 rounded-md border border-slate-700 hover:bg-slate-800"
-          >
-            {showLogsPanel ? "Hide logs" : "View logs"}
-          </button>
-          <button
-            onClick={() =>
-              signOut({
-                callbackUrl: "/auth/login",
-              })
-            }
-            className="text-xs px-2 py-1 rounded-md border border-slate-700 hover:bg-slate-800"
-          >
-            Logout
-          </button>
-        </div>
-      </div>
-
-      <div className="p-3 border-b border-slate-800">
-        <button
-          onClick={handleNewConversation}
-          className="w-full text-xs px-2 py-2 rounded-md bg-sky-600 hover:bg-sky-500"
-        >
-          + New conversation
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto text-xs">
-        {conversations.map((c) => (
-          <div
-            key={c.id}
-            className={`flex items-center justify-between px-3 py-2 border-b border-slate-900 cursor-pointer ${
-              c.id === activeId ? "bg-slate-900" : "hover:bg-slate-900/60"
-            }`}
-            onClick={() => setActiveId(c.id)}
-          >
-            <input
-              className="bg-transparent text-xs flex-1 mr-2 outline-none"
-              ref={(el) => {
-                titleInputRefs.current[c.id] = el;
-              }}
-              value={c.title}
-              onChange={(e) => {
-                const title = e.target.value || "Untitled conversation";
-                setConversations((prev) =>
-                  prev.map((conv) =>
-                    conv.id === c.id ? { ...conv, title } : conv
-                  )
-                );
-              }}
-              onBlur={() => {
-                const conv = conversations.find((conv) => conv.id === c.id);
-                if (conv) {
-                  void persistConversation(conv);
-                }
-              }}
-            />
+  return (
+    <div className="h-screen flex bg-slate-950 text-slate-100 overflow-hidden">
+      {/* Sidebar: conversations + settings */}
+      <aside className="w-64 border-r border-slate-800 bg-slate-950/80 flex flex-col min-h-0">
+        <div className="p-3 border-b border-slate-800 flex items-center justify-between gap-2">
+          <div>
+            <div className="text-sm font-semibold truncate">{displayName}</div>
+            <div className="text-xs text-slate-500">Veilfire Chat</div>
+          </div>
+          <div className="flex items-center gap-1">
             <button
-              className="text-slate-500 hover:text-red-400 ml-1"
-              onClick={(e) => {
-                e.stopPropagation();
-                void handleDeleteConversation(c.id);
-              }}
+              onClick={() => setShowLogsPanel((prev) => !prev)}
+              className="text-xs px-2 py-1 rounded-md border border-slate-700 hover:bg-slate-800"
             >
-              ✕
+              {showLogsPanel ? "Hide logs" : "View logs"}
+            </button>
+            <button
+              onClick={() =>
+                signOut({
+                  callbackUrl: "/auth/login",
+                })
+              }
+              className="text-xs px-2 py-1 rounded-md border border-slate-700 hover:bg-slate-800"
+            >
+              Logout
             </button>
           </div>
-        ))}
-      </div>
-      {activeConversation && (
-        <div className="p-3 border-t border-slate-800 text-xs space-y-[10px] min-h-[220px] max-h-[220px]">
+        </div>
+
+        <div className="p-3 border-b border-slate-800">
+          <button
+            onClick={handleNewConversation}
+            className="w-full text-xs px-2 py-2 rounded-md bg-sky-600 hover:bg-sky-500"
+          >
+            + New conversation
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto text-xs">
+          {conversations.map((c) => (
+            <div
+              key={c.id}
+              className={`flex items-center justify-between px-3 py-2 border-b border-slate-900 cursor-pointer ${
+                c.id === activeId ? "bg-slate-900" : "hover:bg-slate-900/60"
+              }`}
+              onClick={() => setActiveId(c.id)}
+            >
+              <input
+                className="bg-transparent text-xs flex-1 mr-2 outline-none"
+                ref={(el) => {
+                  titleInputRefs.current[c.id] = el;
+                }}
+                value={c.title}
+                onChange={(e) => {
+                  const title = e.target.value || "Untitled conversation";
+                  setConversations((prev) =>
+                    prev.map((conv) =>
+                      conv.id === c.id ? { ...conv, title } : conv
+                    )
+                  );
+                }}
+                onBlur={() => {
+                  const conv = conversations.find((conv) => conv.id === c.id);
+                  if (conv) {
+                    void persistConversation(conv);
+                  }
+                }}
+              />
+              <button
+                className="text-slate-500 hover:text-red-400 ml-1"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void handleDeleteConversation(c.id);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+        {activeConversation && (
+          <div className="p-3 border-t border-slate-800 text-xs space-y-[10px] min-h-[220px] max-h-[220px]">
             <div>
               <label className="block mb-1 text-[11px] uppercase tracking-wide text-slate-500">
                 Model
@@ -1145,7 +1370,7 @@ return (
                   }))
                 }
               />
-            <label
+              <label
                 htmlFor="stream-toggle"
                 className="text-[11px] text-slate-400"
               >
@@ -1185,7 +1410,7 @@ return (
                     }`}
                   >
                     <div
-                      className={`max-w-[70%] rounded-lg px-3 py-2 whitespace-pre-wrap ${
+                      className={`max-w-[70%] min-w-[12%] rounded-lg px-3 py-2 whitespace-pre-wrap ${
                         m.role === "user"
                           ? "bg-sky-600 text-white"
                           : m.role === "assistant"
@@ -1193,31 +1418,102 @@ return (
                           : "bg-amber-900/20 text-amber-100 border border-amber-700/40"
                       }`}
                     >
-                      <div className="text-[10px] font-medium mb-1 opacity-70">
-                        {m.role.toUpperCase()}
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="text-[10px] font-medium opacity-70">
+                          {m.role.toUpperCase()}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {isThinkingBubble &&
+                            m.id === currentAssistantMessageId && (
+                              <button
+                                type="button"
+                                className="text-[10px] text-red-300 hover:text-red-200 animate-pulse"
+                                onClick={handleCancelRequest}
+                              >
+                                Cancel
+                              </button>
+                            )}
+                          {m.role === "assistant" &&
+                            m.id === currentAssistantMessageId &&
+                            toolsUsedThisRun.includes("scratchpad") && (
+                              <button
+                                type="button"
+                                className="ml-2 text-[10px] text-slate-300 hover:text-slate-100"
+                                onClick={() => setScratchpadVisible(true)}
+                              >
+                                <svg
+                                  className="w-3 h-3"
+                                  viewBox="0 0 16 16"
+                                  fill="none"
+                                  xmlns="http://www.w3.org/2000/svg"
+                                >
+                                  <rect
+                                    x="2.25"
+                                    y="1.75"
+                                    width="11.5"
+                                    height="12.5"
+                                    rx="1.5"
+                                    stroke="currentColor"
+                                    strokeWidth="1.5"
+                                  />
+                                  <line
+                                    x1="4"
+                                    y1="5"
+                                    x2="12"
+                                    y2="5"
+                                    stroke="currentColor"
+                                    strokeWidth="1.2"
+                                  />
+                                  <line
+                                    x1="4"
+                                    y1="7.5"
+                                    x2="10.5"
+                                    y2="7.5"
+                                    stroke="currentColor"
+                                    strokeWidth="1.2"
+                                  />
+                                  <line
+                                    x1="4"
+                                    y1="10"
+                                    x2="9"
+                                    y2="10"
+                                    stroke="currentColor"
+                                    strokeWidth="1.2"
+                                  />
+                                </svg>
+                              </button>
+                            )}
+                        </div>
                       </div>
                       {m.role === "assistant" ? (
                         isThinkingBubble ? (
-                          <div className="flex items-center gap-2 text-[12px] text-slate-200">
-                            <span className="inline-flex items-center gap-1">
-                              <span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce [animation-duration:700ms]" />
-                              <span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce [animation-delay:120ms] [animation-duration:700ms]" />
-                              <span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce [animation-delay:240ms] [animation-duration:700ms]" />
-                            </span>
-                            <span>
-                              Thinking...
-                              {" "}
-                              {(() => {
-                                const totalMs = Math.max(0, thinkingElapsedMs);
-                                const seconds = Math.floor(totalMs / 1000)
-                                  .toString()
-                                  .padStart(2, "0");
-                                const ms = (totalMs % 1000)
-                                  .toString()
-                                  .padStart(3, "0");
-                                return `(${seconds}.${ms})`;
-                              })()}
-                            </span>
+                          <div className="flex flex-col gap-1 text-[12px] text-slate-200">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-flex items-center gap-1">
+                                <span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce [animation-duration:700ms]" />
+                                <span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce [animation-delay:120ms] [animation-duration:700ms]" />
+                                <span className="inline-block w-1.5 h-1.5 rounded-full bg-sky-400 animate-bounce [animation-delay:240ms] [animation-duration:700ms]" />
+                              </span>
+                              <span>
+                                Thinking...
+                                {" "}
+                                {(() => {
+                                  const totalMs = Math.max(0, thinkingElapsedMs);
+                                  const seconds = Math.floor(totalMs / 1000)
+                                    .toString()
+                                    .padStart(2, "0");
+                                  const ms = (totalMs % 1000)
+                                    .toString()
+                                    .padStart(3, "0");
+                                  return `(${seconds}.${ms})`;
+                                })()}
+                              </span>
+                            </div>
+                            {toolsUsedThisRun.length > 0 && (
+                              <div className="text-[10px] text-slate-400">
+                                Tool call: {toolsUsedThisRun.join(", ")}
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div className="whitespace-normal">
@@ -1599,6 +1895,84 @@ return (
           </div>
         )}
       </main>
+
+      {activeConversation && scratchpadWidgetEnabled && scratchpadWidgetPos && (
+        <div
+          className="fixed z-40"
+          style={{
+            left: scratchpadWidgetPos.x,
+            top: scratchpadWidgetPos.y,
+          }}
+        >
+          <button
+            type="button"
+            onMouseDown={handleScratchpadWidgetDragStart}
+            onClick={() => setScratchpadVisible((v) => !v)}
+            className={`w-9 h-9 rounded-full bg-slate-950/90 border border-slate-700 shadow-lg flex items-center justify-center text-slate-200 text-xs active:scale-95 ${scratchpadWidgetPulse ? "animate-pulse" : ""}`}
+            aria-label="Show scratchpad"
+          >
+            <svg
+              className="w-4 h-4"
+              viewBox="0 0 16 16"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <rect
+                x="2.25"
+                y="1.75"
+                width="11.5"
+                height="12.5"
+                rx="1.5"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
+              <line
+                x1="4"
+                y1="5"
+                x2="12"
+                y2="5"
+                stroke="currentColor"
+                strokeWidth="1.2"
+              />
+              <line
+                x1="4"
+                y1="7.5"
+                x2="10.5"
+                y2="7.5"
+                stroke="currentColor"
+                strokeWidth="1.2"
+              />
+              <line
+                x1="4"
+                y1="10"
+                x2="9"
+                y2="10"
+                stroke="currentColor"
+                strokeWidth="1.2"
+              />
+            </svg>
+          </button>
+          {scratchpadVisible && (
+            <div className="mt-2 w-72 max-w-[80vw] max-h-[60vh] rounded-lg border border-slate-700 bg-slate-950 shadow-xl text-xs text-slate-100 p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-[11px] uppercase tracking-wide text-slate-500">
+                  AI Scratchpad
+                </div>
+                <button
+                  type="button"
+                  className="text-[11px] text-slate-400 hover:text-slate-200"
+                  onClick={() => setScratchpadVisible(false)}
+                >
+                  Close
+                </button>
+              </div>
+              <div className="max-h-[48vh] overflow-y-auto whitespace-pre-wrap text-[11px]">
+                {scratchpad}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {showConfigModal && activeConversation && (
         <div className="fixed inset-0 z-40 bg-slate-950/95 backdrop-blur-sm flex flex-col">

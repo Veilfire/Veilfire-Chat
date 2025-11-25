@@ -10,6 +10,7 @@ export interface ChatLog {
     systemPrompt: string;
     plannerPrompt: string;
     reflectorPrompt: string;
+    scratchpad?: string;
     contextConfig: ContextConfig;
     messages: ChatMessage[];
     trimmedMessages: ChatMessage[];

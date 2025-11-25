@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    image: veilfire-chat:latest
+    container_name: veilfire-chat
+    ports:
+      - "3000:3000"
+    # Load base environment (OPENROUTER_API_KEY, NEXTAUTH_SECRET, etc.)
+    env_file:
+      - .env
+    environment:
+      # Override MongoDB host for containers: use the mongo service name
+      MONGODB_URI: mongodb://mongo:27017/veilfire_chat
+      MONGO_AUTH: "FALSE"
+      APP_URL: http://localhost:3000
+      NEXTAUTH_URL: http://localhost:3000
+    depends_on:
+      - mongo
+
+  mongo:
+    image: mongo:7.0
+    container_name: veilfire-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+volumes:
+  mongo-data:
