@@ -102,14 +102,6 @@ export default function HomePage() {
   const [scratchpad, setScratchpad] = useState<string>("");
   const [scratchpadVisible, setScratchpadVisible] = useState(false);
 
-  const [scratchpadWidgetPos, setScratchpadWidgetPos] = useState<
-    { x: number; y: number } | null
-  >(null);
-
-  const [scratchpadWidgetPulse, setScratchpadWidgetPulse] = useState(false);
-
-  const [scratchpadWidgetEnabled, setScratchpadWidgetEnabled] = useState(false);
-
   const [toolsUsedThisRun, setToolsUsedThisRun] = useState<string[]>([]);
   const [currentAssistantMessageId, setCurrentAssistantMessageId] = useState<
     string | null
@@ -140,48 +132,6 @@ export default function HomePage() {
     if (typeof window === "undefined") return;
     setPresets(loadPresets());
   }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem("vf-scratchpad-widget-pos");
-      if (raw) {
-        const parsed = JSON.parse(raw) as { x: number; y: number };
-        if (
-          parsed &&
-          typeof parsed.x === "number" &&
-          typeof parsed.y === "number"
-        ) {
-          setScratchpadWidgetPos(parsed);
-          return;
-        }
-      }
-    } catch {
-    }
-    const width = window.innerWidth || 0;
-    const height = window.innerHeight || 0;
-    const iconSize = 40;
-    const margin = 24;
-    const inputRegionHeight = 220; // approximate chat input bar height
-    const defaultX =
-      width > 0 ? width - iconSize - margin : 0;
-    const defaultY =
-      height > 0
-        ? Math.max(margin, height - inputRegionHeight - iconSize - margin)
-        : 0;
-    setScratchpadWidgetPos({ x: defaultX, y: defaultY });
-  }, []);
-
-  useEffect(() => {
-    if (!scratchpadWidgetPulse) return;
-    if (typeof window === "undefined") return;
-    const id = window.setTimeout(() => {
-      setScratchpadWidgetPulse(false);
-    }, 1200);
-    return () => {
-      window.clearTimeout(id);
-    };
-  }, [scratchpadWidgetPulse]);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -682,13 +632,6 @@ export default function HomePage() {
         const data = (await res.json()) as { content?: string | null };
         const content = (data.content ?? "") || "";
         setScratchpad(content);
-        setScratchpadWidgetEnabled((prev) => {
-          const next = prev || Boolean(content);
-          if (!prev && next) {
-            setScratchpadWidgetPulse(true);
-          }
-          return next;
-        });
         if (!content) {
           setScratchpadVisible(false);
         }
@@ -708,7 +651,6 @@ export default function HomePage() {
     if (!activeConversation) {
       setScratchpad("");
       setScratchpadVisible(false);
-      setScratchpadWidgetEnabled(false);
       return;
     }
     void loadScratchpadForConversation(activeConversation.id);
@@ -775,70 +717,6 @@ export default function HomePage() {
       window.removeEventListener("mouseup", onUp);
     };
 
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  };
-
-  const handleScratchpadWidgetDragStart = (
-    e: React.MouseEvent<HTMLButtonElement>
-  ) => {
-    if (typeof window === "undefined") return;
-    if (!scratchpadWidgetPos) {
-      const width = window.innerWidth || 0;
-      const height = window.innerHeight || 0;
-      const iconSize = 40;
-      const margin = 24;
-      const inputRegionHeight = 220;
-      const defaultX =
-        width > 0 ? width - iconSize - margin : 0;
-      const defaultY =
-        height > 0
-          ? Math.max(margin, height - inputRegionHeight - iconSize - margin)
-          : 0;
-      setScratchpadWidgetPos({ x: defaultX, y: defaultY });
-    }
-    e.preventDefault();
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const base =
-      scratchpadWidgetPos ?? {
-        x: (window.innerWidth || 0) - 120,
-        y: (window.innerHeight || 0) - 140,
-      };
-    let lastX = base.x;
-    let lastY = base.y;
-    const onMove = (event: MouseEvent) => {
-      const dx = event.clientX - startX;
-      const dy = event.clientY - startY;
-      const width = window.innerWidth || 0;
-      const height = window.innerHeight || 0;
-      const margin = 24;
-      const iconSize = 40;
-      let nextX = base.x + dx;
-      let nextY = base.y + dy;
-      if (nextX < margin) nextX = margin;
-      if (nextY < margin) nextY = margin;
-      if (nextX > width - iconSize - margin) {
-        nextX = width - iconSize - margin;
-      }
-      if (nextY > height - iconSize - margin) {
-        nextY = height - iconSize - margin;
-      }
-      lastX = nextX;
-      lastY = nextY;
-      setScratchpadWidgetPos({ x: nextX, y: nextY });
-    };
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      try {
-        window.localStorage.setItem(
-          "vf-scratchpad-widget-pos",
-          JSON.stringify({ x: lastX, y: lastY })
-        );
-      } catch {
-      }
-    };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
   };
@@ -944,10 +822,6 @@ export default function HomePage() {
           .map((t) => t.trim())
           .filter(Boolean);
         setToolsUsedThisRun(runTools);
-        if (runTools.includes("scratchpad")) {
-          setScratchpadWidgetEnabled(true);
-          setScratchpadWidgetPulse(true);
-        }
       }
 
       if (!res.body) {
@@ -1002,7 +876,7 @@ export default function HomePage() {
         void loadScratchpadForConversation(convToPersist.id);
       }
     } catch (err) {
-      if ((err as any)?.name === "AbortError") {
+      if (err instanceof Error && err.name === "AbortError") {
         let abortedConv: Conversation | null = null;
 
         setConversations((prev) =>
@@ -1379,6 +1253,44 @@ export default function HomePage() {
             </div>
           </div>
         )}
+
+        {/* Scratchpad side panel */}
+        {scratchpadVisible && activeConversation && (
+          <div
+            className="absolute top-0 right-0 bottom-0 max-w-[40vw] border-l border-slate-800 bg-slate-950/95 backdrop-blur-sm shadow-xl flex flex-col min-h-0 overflow-hidden z-20"
+            style={{ width: logsPanelWidth }}
+          >
+            <div
+              className="absolute inset-y-0 left-0 w-2 cursor-col-resize bg-slate-800/40 hover:bg-slate-700/70 z-10"
+              onMouseDown={handleLogsPanelResizeStart}
+            />
+            <div className="p-3 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <div className="text-xs font-semibold">Scratchpad</div>
+                <div className="text-[11px] text-slate-500">
+                  Conversation: {activeConversation.title}
+                </div>
+              </div>
+              <button
+                className="text-xs px-2 py-1 rounded-md border border-slate-700 hover:bg-slate-800"
+                onClick={() => setScratchpadVisible(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 p-3 text-xs">
+              {scratchpad ? (
+                <div className="h-full max-h-full overflow-y-auto whitespace-pre-wrap bg-slate-900 border border-slate-800 rounded-md px-2 py-1 text-[11px]">
+                  {scratchpad}
+                </div>
+              ) : (
+                <div className="text-[11px] text-slate-500">
+                  No scratchpad content yet for this conversation.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </aside>
 
       {/* Main chat area */}
@@ -1438,8 +1350,11 @@ export default function HomePage() {
                             toolsUsedThisRun.includes("scratchpad") && (
                               <button
                                 type="button"
-                                className="ml-2 text-[10px] text-slate-300 hover:text-slate-100"
-                                onClick={() => setScratchpadVisible(true)}
+                                className="ml-2 text-[10px] text-emerald-300 hover:text-slate-100 animate-pulse"
+                                onClick={() =>
+                                  setScratchpadVisible((prev) => !prev)
+                                }
+                                aria-label="Show scratchpad"
                               >
                                 <svg
                                   className="w-3 h-3"
@@ -1908,84 +1823,6 @@ export default function HomePage() {
           </div>
         )}
       </main>
-
-      {activeConversation && scratchpadWidgetEnabled && scratchpadWidgetPos && (
-        <div
-          className="fixed z-40"
-          style={{
-            left: scratchpadWidgetPos.x,
-            top: scratchpadWidgetPos.y,
-          }}
-        >
-          <button
-            type="button"
-            onMouseDown={handleScratchpadWidgetDragStart}
-            onClick={() => setScratchpadVisible((v) => !v)}
-            className={`w-9 h-9 rounded-full bg-slate-950/90 border border-slate-700 shadow-lg flex items-center justify-center text-slate-200 text-xs active:scale-95 ${scratchpadWidgetPulse ? "animate-pulse" : ""}`}
-            aria-label="Show scratchpad"
-          >
-            <svg
-              className="w-4 h-4"
-              viewBox="0 0 16 16"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <rect
-                x="2.25"
-                y="1.75"
-                width="11.5"
-                height="12.5"
-                rx="1.5"
-                stroke="currentColor"
-                strokeWidth="1.5"
-              />
-              <line
-                x1="4"
-                y1="5"
-                x2="12"
-                y2="5"
-                stroke="currentColor"
-                strokeWidth="1.2"
-              />
-              <line
-                x1="4"
-                y1="7.5"
-                x2="10.5"
-                y2="7.5"
-                stroke="currentColor"
-                strokeWidth="1.2"
-              />
-              <line
-                x1="4"
-                y1="10"
-                x2="9"
-                y2="10"
-                stroke="currentColor"
-                strokeWidth="1.2"
-              />
-            </svg>
-          </button>
-          {scratchpadVisible && (
-            <div className="mt-2 w-72 max-w-[80vw] max-h-[60vh] rounded-lg border border-slate-700 bg-slate-950 shadow-xl text-xs text-slate-100 p-3">
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-[11px] uppercase tracking-wide text-slate-500">
-                  AI Scratchpad
-                </div>
-                <button
-                  type="button"
-                  className="text-[11px] text-slate-400 hover:text-slate-200"
-                  onClick={() => setScratchpadVisible(false)}
-                >
-                  Close
-                </button>
-              </div>
-              <div className="max-h-[48vh] overflow-y-auto whitespace-pre-wrap text-[11px]">
-                {scratchpad}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {showConfigModal && activeConversation && (
         <div className="fixed inset-0 z-40 bg-slate-950/95 backdrop-blur-sm flex flex-col">
