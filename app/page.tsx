@@ -23,10 +23,37 @@ interface PromptPreset {
   reflectorPrompt: string;
 }
 
+interface McpServerEnvVar {
+  key: string;
+  value: string;
+}
+
+interface McpServerConfig {
+  id: string;
+  label?: string;
+  enabled?: boolean;
+  type?: string;
+  command?: string;
+  args?: string[];
+  env?: McpServerEnvVar[];
+}
+
+interface McpServerConfigState {
+  id: string;
+  label: string;
+  enabled: boolean;
+  type?: string | null;
+  command: string;
+  args: string[];
+  env: McpServerEnvVar[];
+}
+
 interface UserSettingsState {
   hasApiKey: boolean;
   apiKeyLast4: string | null;
   customModels: ModelConfig[];
+  mcpEnabled: boolean;
+  mcpServers: McpServerConfig[];
 }
 
 const PRESETS_STORAGE_KEY = "llm-chat-prompt-presets";
@@ -115,6 +142,11 @@ export default function HomePage() {
   const [userSettingsLoading, setUserSettingsLoading] = useState(false);
   const [userSettingsError, setUserSettingsError] = useState<string | null>(
     null
+  );
+
+  const [mcpEnabledDraft, setMcpEnabledDraft] = useState(false);
+  const [mcpServersDraft, setMcpServersDraft] = useState<McpServerConfigState[]>(
+    []
   );
 
   const [openRouterModels, setOpenRouterModels] = useState<ModelConfig[]>([]);
@@ -379,6 +411,37 @@ export default function HomePage() {
     };
   }, [showConfigModal]);
 
+  useEffect(() => {
+    if (!userSettings) {
+      setMcpEnabledDraft(false);
+      setMcpServersDraft([]);
+      return;
+    }
+
+    setMcpEnabledDraft(userSettings.mcpEnabled ?? false);
+
+    const normalizedServers: McpServerConfigState[] = Array.isArray(
+      userSettings.mcpServers
+    )
+      ? userSettings.mcpServers.map((server) => ({
+          id: server.id,
+          label: server.label ?? server.id,
+          enabled: server.enabled ?? false,
+          type: server.type ?? null,
+          command: server.command ?? "",
+          args: Array.isArray(server.args) ? server.args : [],
+          env: Array.isArray(server.env)
+            ? server.env.map((pair) => ({
+                key: pair.key ?? "",
+                value: pair.value ?? "",
+              }))
+            : [],
+        }))
+      : [];
+
+    setMcpServersDraft(normalizedServers);
+  }, [userSettings]);
+
   const allModels = useMemo(() => {
     const base = DEFAULT_MODELS.map((m) => ({
       ...m,
@@ -495,6 +558,98 @@ export default function HomePage() {
       setUserSettings(data);
     } catch {
       setUserSettingsError("Failed to remove model from your list.");
+    }
+  };
+
+  const handleAddMcpServer = () => {
+    const id = `mcp-server-${Date.now()}`;
+    setMcpServersDraft((prev) => [
+      ...prev,
+      {
+        id,
+        label: "New MCP server",
+        enabled: true,
+        type: "custom",
+        command: "",
+        args: [],
+        env: [],
+      },
+    ]);
+  };
+
+  const handleUpdateMcpServer = (
+    id: string,
+    updater: (server: McpServerConfigState) => McpServerConfigState
+  ) => {
+    setMcpServersDraft((prev) =>
+      prev.map((server) => (server.id === id ? updater(server) : server))
+    );
+  };
+
+  const handleChangeMcpServerArgs = (id: string, value: string) => {
+    const parts = value
+      .split(" ")
+      .map((p) => p.trim())
+      .filter(Boolean);
+    handleUpdateMcpServer(id, (server) => ({
+      ...server,
+      args: parts,
+    }));
+  };
+
+  const handleAddMcpEnvVar = (id: string) => {
+    handleUpdateMcpServer(id, (server) => ({
+      ...server,
+      env: [...server.env, { key: "", value: "" }],
+    }));
+  };
+
+  const handleUpdateMcpEnvVar = (
+    id: string,
+    index: number,
+    field: "key" | "value",
+    value: string
+  ) => {
+    handleUpdateMcpServer(id, (server) => {
+      const nextEnv = server.env.map((pair, i) =>
+        i === index ? { ...pair, [field]: value } : pair
+      );
+      return {
+        ...server,
+        env: nextEnv,
+      };
+    });
+  };
+
+  const handleRemoveMcpEnvVar = (id: string, index: number) => {
+    handleUpdateMcpServer(id, (server) => ({
+      ...server,
+      env: server.env.filter((_, i) => i !== index),
+    }));
+  };
+
+  const handleDeleteMcpServer = (id: string) => {
+    setMcpServersDraft((prev) => prev.filter((server) => server.id !== id));
+  };
+
+  const handleSaveMcpSettings = async () => {
+    setUserSettingsError(null);
+    try {
+      const res = await fetch("/api/user-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mcpEnabled: mcpEnabledDraft,
+          mcpServers: mcpServersDraft,
+        }),
+      });
+      if (!res.ok) {
+        throw new Error(`Failed to save MCP settings: ${res.status}`);
+      }
+      const data = (await res.json()) as UserSettingsState;
+      setUserSettings(data);
+    } catch {
+      setUserSettingsError("Failed to save MCP settings.");
     }
   };
 
@@ -2114,6 +2269,226 @@ export default function HomePage() {
                       configured.
                     </div>
                   )}
+                </div>
+              </div>
+
+              <div className="border-t border-slate-800 pt-3 mt-2 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-slate-500">
+                      Model Context Protocol (MCP)
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      Enable MCP tools and configure MCP servers for this user.
+                    </div>
+                  </div>
+                  <label className="inline-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="h-3 w-3"
+                      checked={mcpEnabledDraft}
+                      onChange={(e) => setMcpEnabledDraft(e.target.checked)}
+                    />
+                    <span className="text-[11px] text-slate-300">Enabled</span>
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="text-[11px] uppercase tracking-wide text-slate-500">
+                    MCP servers
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddMcpServer}
+                    className="text-[11px] px-2 py-1 rounded-md border border-slate-700 hover:bg-slate-800"
+                  >
+                    + Add MCP server
+                  </button>
+                </div>
+
+                {mcpServersDraft.length === 0 ? (
+                  <div className="text-[11px] text-slate-500">
+                    No MCP servers configured yet. Use the Add MCP server button
+                    to create one.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {mcpServersDraft.map((server, index) => (
+                      <div
+                        key={server.id}
+                        className="border border-slate-800 rounded-md bg-slate-950/80 p-3 space-y-2"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex-1 space-y-1">
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                className="flex-1 bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
+                                placeholder="Server name"
+                                value={server.label}
+                                onChange={(e) =>
+                                  handleUpdateMcpServer(server.id, (s) => ({
+                                    ...s,
+                                    label: e.target.value,
+                                  }))
+                                }
+                              />
+                              <input
+                                type="text"
+                                className="w-40 bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
+                                placeholder="Server id"
+                                value={server.id}
+                                onChange={(e) =>
+                                  handleUpdateMcpServer(server.id, (s) => ({
+                                    ...s,
+                                    id: e.target.value || s.id,
+                                  }))
+                                }
+                              />
+                            </div>
+                            <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                              <span>Server #{index + 1}</span>
+                              {server.type && <span>Type: {server.type}</span>}
+                            </div>
+                          </div>
+                          <label className="inline-flex items-center gap-1">
+                            <input
+                              type="checkbox"
+                              className="h-3 w-3"
+                              checked={server.enabled}
+                              onChange={(e) =>
+                                handleUpdateMcpServer(server.id, (s) => ({
+                                  ...s,
+                                  enabled: e.target.checked,
+                                }))
+                              }
+                            />
+                            <span className="text-[11px] text-slate-300">
+                              Enabled
+                            </span>
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMcpServer(server.id)}
+                            className="text-[10px] px-2 py-0.5 rounded-md border border-red-700 text-red-300 hover:bg-red-900/40"
+                          >
+                            Delete
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <div className="text-[10px] text-slate-500">
+                              Command
+                            </div>
+                            <input
+                              type="text"
+                              className="w-full bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
+                              placeholder="e.g. node"
+                              value={server.command}
+                              onChange={(e) =>
+                                handleUpdateMcpServer(server.id, (s) => ({
+                                  ...s,
+                                  command: e.target.value,
+                                }))
+                              }
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <div className="text-[10px] text-slate-500">
+                              Arguments
+                            </div>
+                            <input
+                              type="text"
+                              className="w-full bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
+                              placeholder="Space-separated arguments"
+                              value={server.args.join(" ")}
+                              onChange={(e) =>
+                                handleChangeMcpServerArgs(server.id, e.target.value)
+                              }
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-slate-500">
+                              Environment / parameters
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleAddMcpEnvVar(server.id)}
+                              className="text-[10px] px-2 py-0.5 rounded-md border border-slate-700 hover:bg-slate-800"
+                            >
+                              + Add parameter
+                            </button>
+                          </div>
+                          {server.env.length === 0 ? (
+                            <div className="text-[11px] text-slate-500">
+                              No parameters configured.
+                            </div>
+                          ) : (
+                            <div className="space-y-1">
+                              {server.env.map((pair, envIndex) => (
+                                <div
+                                  key={`${server.id}-env-${envIndex}`}
+                                  className="flex items-center gap-2"
+                                >
+                                  <input
+                                    type="text"
+                                    className="w-40 bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
+                                    placeholder="KEY"
+                                    value={pair.key}
+                                    onChange={(e) =>
+                                      handleUpdateMcpEnvVar(
+                                        server.id,
+                                        envIndex,
+                                        "key",
+                                        e.target.value
+                                      )
+                                    }
+                                  />
+                                  <input
+                                    type="text"
+                                    className="flex-1 bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
+                                    placeholder="Value"
+                                    value={pair.value}
+                                    onChange={(e) =>
+                                      handleUpdateMcpEnvVar(
+                                        server.id,
+                                        envIndex,
+                                        "value",
+                                        e.target.value
+                                      )
+                                    }
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleRemoveMcpEnvVar(server.id, envIndex)
+                                    }
+                                    className="text-[10px] px-1.5 py-0.5 rounded-md border border-slate-700 hover:bg-slate-800"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="pt-2 border-t border-slate-800 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveMcpSettings()}
+                    className="text-xs px-3 py-1.5 rounded-md border border-slate-700 hover:bg-slate-800"
+                  >
+                    Save MCP settings
+                  </button>
                 </div>
               </div>
             </div>

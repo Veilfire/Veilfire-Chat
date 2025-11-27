@@ -6,10 +6,27 @@ import type { ModelConfig } from "@/lib/chatTypes";
 
 const DB_NAME = process.env.MONGODB_DB || "llm_chat_mvp";
 
+interface McpServerEnvVarDoc {
+  key: string;
+  value: string;
+}
+
+interface McpServerConfigDoc {
+  id: string;
+  label?: string;
+  enabled?: boolean;
+  type?: string;
+  command?: string;
+  args?: string[];
+  env?: McpServerEnvVarDoc[];
+}
+
 interface UserSettingsDoc {
   userId: string;
   openRouterApiKey?: string | null;
   customModels?: ModelConfig[];
+  mcpEnabled?: boolean;
+  mcpServers?: McpServerConfigDoc[];
 }
 
 function sanitize(doc: UserSettingsDoc | null) {
@@ -18,16 +35,67 @@ function sanitize(doc: UserSettingsDoc | null) {
       hasApiKey: false,
       apiKeyLast4: null as string | null,
       customModels: [] as ModelConfig[],
+      mcpEnabled: false,
+      mcpServers: [] as McpServerConfigDoc[],
     };
   }
 
   const key = doc.openRouterApiKey ?? null;
   const last4 = key && key.length >= 4 ? key.slice(-4) : null;
 
+  const normalizedServers = Array.isArray(doc.mcpServers)
+    ? doc.mcpServers
+        .map((server): McpServerConfigDoc | null => {
+          if (!server || typeof server !== "object") return null;
+
+          const id = typeof server.id === "string" && server.id ? server.id : "";
+          if (!id) return null;
+
+          const label =
+            typeof server.label === "string" && server.label ? server.label : id;
+          const enabled = !!server.enabled;
+          const type =
+            typeof server.type === "string" && server.type ? server.type : undefined;
+          const command =
+            typeof server.command === "string" ? server.command : "";
+
+          const args = Array.isArray(server.args)
+            ? server.args.filter((a): a is string => typeof a === "string")
+            : [];
+
+          const env = Array.isArray(server.env)
+            ? server.env
+                .map((pair): McpServerEnvVarDoc | null => {
+                  if (!pair || typeof pair !== "object") return null;
+                  const key =
+                    typeof pair.key === "string" ? pair.key : "";
+                  const value =
+                    typeof pair.value === "string" ? pair.value : "";
+                  if (!key && !value) return null;
+                  return { key, value };
+                })
+                .filter((p): p is McpServerEnvVarDoc => p !== null)
+            : [];
+
+          return {
+            id,
+            label,
+            enabled,
+            type,
+            command,
+            args,
+            env,
+          };
+        })
+        .filter((s): s is McpServerConfigDoc => s !== null)
+    : [];
+
   return {
     hasApiKey: !!key,
     apiKeyLast4: last4,
     customModels: Array.isArray(doc.customModels) ? doc.customModels : [],
+    mcpEnabled: !!doc.mcpEnabled,
+    mcpServers: normalizedServers,
   };
 }
 
@@ -116,6 +184,65 @@ export async function PUT(req: NextRequest) {
       .filter((m): m is ModelConfig => m !== null);
 
     update.customModels = cleaned;
+  }
+
+  const maybeMcpEnabled = (body as Record<string, unknown>).mcpEnabled;
+  if (typeof maybeMcpEnabled === "boolean") {
+    update.mcpEnabled = maybeMcpEnabled;
+  }
+
+  const maybeMcpServers = (body as Record<string, unknown>).mcpServers;
+  if (Array.isArray(maybeMcpServers)) {
+    const cleanedMcp: McpServerConfigDoc[] = maybeMcpServers
+      .map((server): McpServerConfigDoc | null => {
+        if (!server || typeof server !== "object") return null;
+        const obj = server as Record<string, unknown>;
+
+        const id = typeof obj.id === "string" ? obj.id : "";
+        if (!id) return null;
+
+        const label =
+          typeof obj.label === "string" && obj.label ? obj.label : id;
+        const enabled = Boolean(obj.enabled);
+        const type =
+          typeof obj.type === "string" && obj.type ? obj.type : undefined;
+        const command =
+          typeof obj.command === "string" ? obj.command : "";
+
+        const argsSource = obj.args;
+        const args = Array.isArray(argsSource)
+          ? argsSource.filter((a): a is string => typeof a === "string")
+          : [];
+
+        const envSource = obj.env;
+        const env: McpServerEnvVarDoc[] = Array.isArray(envSource)
+          ? envSource
+              .map((pair): McpServerEnvVarDoc | null => {
+                if (!pair || typeof pair !== "object") return null;
+                const p = pair as Record<string, unknown>;
+                const key =
+                  typeof p.key === "string" ? p.key : "";
+                const value =
+                  typeof p.value === "string" ? p.value : "";
+                if (!key && !value) return null;
+                return { key, value };
+              })
+              .filter((p): p is McpServerEnvVarDoc => p !== null)
+          : [];
+
+        return {
+          id,
+          label,
+          enabled,
+          type,
+          command,
+          args,
+          env,
+        };
+      })
+      .filter((s): s is McpServerConfigDoc => s !== null);
+
+    update.mcpServers = cleanedMcp;
   }
 
   const client = await clientPromise;
