@@ -149,6 +149,10 @@ export default function HomePage() {
     []
   );
 
+  const [configTab, setConfigTab] = useState<"prompts" | "models" | "mcp">(
+    "prompts"
+  );
+
   const [openRouterModels, setOpenRouterModels] = useState<ModelConfig[]>([]);
   const [openRouterModelsLoading, setOpenRouterModelsLoading] =
     useState(false);
@@ -1985,7 +1989,7 @@ export default function HomePage() {
             <div>
               <div className="text-sm font-semibold">Configuration</div>
               <div className="text-xs text-slate-500">
-                Prompts, models, and provider settings
+                Prompts, models, MCP, and provider settings
               </div>
             </div>
             <button
@@ -1996,501 +2000,546 @@ export default function HomePage() {
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-4 py-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] uppercase tracking-wide text-slate-500">
-                    Prompt preset
-                  </span>
-                  <select
-                    className="bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs"
-                    value={selectedPresetId}
-                    onChange={(e) => handleApplyPreset(e.target.value)}
-                  >
-                    <option value="">None</option>
-                    {presets.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    className="bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px] w-32"
-                    type="text"
-                    placeholder="Preset name"
-                    value={presetNameInput}
-                    onChange={(e) => {
-                      const raw = e.target.value;
-                      const sanitized = raw
-                        .replace(/[^A-Za-z0-9 _-]/g, "")
-                        .slice(0, 32);
-                      setPresetNameInput(sanitized);
-                    }}
-                  />
-                  <button
-                    onClick={handleSavePreset}
-                    className="rounded-md border border-slate-700 px-2 py-1 text-[11px] hover:bg-slate-800"
-                  >
-                    Save as preset
-                  </button>
-                </div>
+          <div className="flex-1 overflow-y-auto px-4 py-4 text-xs">
+            <div className="space-y-3 max-w-5xl mx-auto">
+              <div className="flex items-center gap-2 border-b border-slate-800 pb-1">
+                <button
+                  type="button"
+                  onClick={() => setConfigTab("prompts")}
+                  className={`px-2 py-1 rounded-md text-[11px] border ${
+                    configTab === "prompts"
+                      ? "border-slate-500 bg-slate-900 text-slate-100"
+                      : "border-slate-800 text-slate-400 hover:bg-slate-900/40"
+                  }`}
+                >
+                  Prompts
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfigTab("models")}
+                  className={`px-2 py-1 rounded-md text-[11px] border ${
+                    configTab === "models"
+                      ? "border-slate-500 bg-slate-900 text-slate-100"
+                      : "border-slate-800 text-slate-400 hover:bg-slate-900/40"
+                  }`}
+                >
+                  Models & provider
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfigTab("mcp")}
+                  className={`px-2 py-1 rounded-md text-[11px] border ${
+                    configTab === "mcp"
+                      ? "border-slate-500 bg-slate-900 text-slate-100"
+                      : "border-slate-800 text-slate-400 hover:bg-slate-900/40"
+                  }`}
+                >
+                  MCP
+                </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <div>
-                    <span className="text-[11px] uppercase tracking-wide text-slate-500">
-                      System prompt
-                    </span>
-                    <textarea
-                      className="mt-1 w-full min-h-[240px] bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs"
-                      value={activeConversation.settings.systemPrompt}
-                      onChange={(e) =>
-                        updateActiveConversation((conv) => ({
-                          ...conv,
-                          settings: {
-                            ...conv.settings,
-                            systemPrompt: e.target.value,
-                          },
-                        }))
-                      }
-                    />
-                  </div>
-                  <div>
-                    <span className="text-[11px] uppercase tracking-wide text-slate-500">
-                      Planner instructions
-                    </span>
-                    <textarea
-                      className="mt-1 w-full min-h-[240px] bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs"
-                      placeholder="High-level planning / decomposition guidance..."
-                      value={activeConversation.settings.plannerPrompt}
-                      onChange={(e) =>
-                        updateActiveConversation((conv) => ({
-                          ...conv,
-                          settings: {
-                            ...conv.settings,
-                            plannerPrompt: e.target.value,
-                          },
-                        }))
-                      }
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <div>
-                    <span className="text-[11px] uppercase tracking-wide text-slate-500">
-                      Reflector / self-critique
-                    </span>
-                    <textarea
-                      className="mt-1 w-full min-h-[240px] bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs"
-                      placeholder="E.g. ask the model to critique its own reasoning..."
-                      value={activeConversation.settings.reflectorPrompt}
-                      onChange={(e) =>
-                        updateActiveConversation((conv) => ({
-                          ...conv,
-                          settings: {
-                            ...conv.settings,
-                            reflectorPrompt: e.target.value,
-                          },
-                        }))
-                      }
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">
-                  OpenRouter API key
-                </div>
-                <div className="space-y-1">
-                  {userSettingsLoading ? (
-                    <div className="text-[11px] text-slate-500">
-                      Loading settings…
-                    </div>
-                  ) : (
-                    <>
-                      <div className="text-[11px] text-slate-400">
-                        {userSettings?.hasApiKey
-                          ? userSettings.apiKeyLast4
-                            ? `Key configured (ending in ${userSettings.apiKeyLast4}).`
-                            : "Key configured."
-                          : "No user-specific key stored. The server environment key will be used if configured."}
-                      </div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <input
-                          type="password"
-                          className="flex-1 bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs"
-                          placeholder="Enter new OpenRouter API key"
-                          value={apiKeyInput}
-                          onChange={(e) => setApiKeyInput(e.target.value)}
-                        />
-                        <button
-                          onClick={() => void handleSaveApiKey()}
-                          disabled={apiKeySaving || !apiKeyInput.trim()}
-                          className="text-xs px-2 py-1 rounded-md border border-slate-700 hover:bg-slate-800 disabled:opacity-60"
-                        >
-                          Save
-                        </button>
-                        {userSettings?.hasApiKey && (
-                          <button
-                            onClick={() => void handleClearApiKey()}
-                            disabled={apiKeySaving}
-                            className="text-xs px-2 py-1 rounded-md border border-red-700 text-red-300 hover:bg-red-900/40 disabled:opacity-60"
-                          >
-                            Remove
-                          </button>
-                        )}
-                      </div>
-                      {userSettingsError && (
-                        <div className="text-[11px] text-red-400">
-                          {userSettingsError}
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">
-                  Your models
-                </div>
-                <div className="text-[11px] text-slate-400 mb-1">
-                  These models appear in the chat sidebar.
-                </div>
-                <div className="max-h-32 overflow-y-auto space-y-1 border border-slate-800 rounded-md p-2 bg-slate-950/60">
-                  {allModels.map((m) => (
-                    <div
-                      key={m.id}
-                      className="flex items-center justify-between gap-2"
-                    >
-                      <div>
-                        <div className="text-[11px]">
-                          {m.label}
-                          {selectedModel && selectedModel.id === m.id && (
-                            <span className="ml-1 text-[10px] text-sky-400">
-                              (selected)
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-[10px] text-slate-500">
-                          {m.provider ?? "provider unknown"} • {m.id}
-                          {m.contextWindow
-                            ? ` • ${m.contextWindow.toLocaleString()} tokens`
-                            : ""}
-                        </div>
-                      </div>
-                      {m.origin === "custom" && (
-                        <button
-                          onClick={() => void handleRemoveCustomModel(m.id)}
-                          className="text-[10px] px-2 py-0.5 rounded-md border border-slate-700 hover:bg-slate-800"
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                  {allModels.length === 0 && (
-                    <div className="text-[11px] text-slate-500">
-                      No models configured.
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[11px] uppercase tracking-wide text-slate-500">
-                    Browse OpenRouter models
-                  </span>
-                  {openRouterModelsLoading && (
-                    <span className="text-[10px] text-slate-400">
-                      Loading…
-                    </span>
-                  )}
-                </div>
-                {openRouterModelsError && (
-                  <div className="text-[11px] text-red-400 mb-1">
-                    {openRouterModelsError}
-                  </div>
-                )}
-                <input
-                  type="text"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs"
-                  placeholder="Search by name or id..."
-                  value={modelSearch}
-                  onChange={(e) => setModelSearch(e.target.value)}
-                />
-                <div className="mt-2 min-h-[32lh] max-h-[42lh] overflow-y-hidden overflow-y-scroll space-y-1 border border-slate-800 rounded-md p-2 bg-slate-950/60">
-                  {openRouterModels
-                    .filter((m) => {
-                      const q = modelSearch.trim().toLowerCase();
-                      if (!q) return true;
-                      const haystack = `${m.label} ${m.id} ${
-                        m.provider ?? ""
-                      }`.toLowerCase();
-                      return haystack.includes(q);
-                    })
-                    .slice(0, 50)
-                    .map((m) => (
-                      <div
-                        key={m.id}
-                        className="flex items-center justify-between gap-2"
+              {configTab === "prompts" && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] uppercase tracking-wide text-slate-500">
+                        Prompt preset
+                      </span>
+                      <select
+                        className="bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs"
+                        value={selectedPresetId}
+                        onChange={(e) => handleApplyPreset(e.target.value)}
                       >
-                        <div>
-                          <div className="text-[11px] font-medium">
-                            {m.label}
-                          </div>
-                          <div className="text-[10px] text-slate-500">
-                            {m.provider ?? "provider"} • {m.id}
-                            {m.contextWindow
-                              ? ` • ${m.contextWindow.toLocaleString()} tokens`
-                              : ""}
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => void handleAddCustomModel(m)}
-                          className="text-[10px] px-2 py-0.5 rounded-md border border-slate-700 hover:bg-slate-800"
-                        >
-                          Add
-                        </button>
-                      </div>
-                    ))}
-                  {!openRouterModelsLoading && openRouterModels.length === 0 && (
-                    <div className="text-[11px] text-slate-500">
-                      No models loaded yet. Ensure an OpenRouter API key is
-                      configured.
+                        <option value="">None</option>
+                        {presets.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
                     </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="border-t border-slate-800 pt-3 mt-2 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-wide text-slate-500">
-                      Model Context Protocol (MCP)
-                    </div>
-                    <div className="text-[11px] text-slate-400">
-                      Enable MCP tools and configure MCP servers for this user.
+                    <div className="flex items-center gap-2">
+                      <input
+                        className="bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px] w-32"
+                        type="text"
+                        placeholder="Preset name"
+                        value={presetNameInput}
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          const sanitized = raw
+                            .replace(/[^A-Za-z0-9 _-]/g, "")
+                            .slice(0, 32);
+                          setPresetNameInput(sanitized);
+                        }}
+                      />
+                      <button
+                        onClick={handleSavePreset}
+                        className="rounded-md border border-slate-700 px-2 py-1 text-[11px] hover:bg-slate-800"
+                      >
+                        Save as preset
+                      </button>
                     </div>
                   </div>
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      className="h-3 w-3"
-                      checked={mcpEnabledDraft}
-                      onChange={(e) => setMcpEnabledDraft(e.target.checked)}
-                    />
-                    <span className="text-[11px] text-slate-300">Enabled</span>
-                  </label>
-                </div>
 
-                <div className="flex items-center justify-between">
-                  <div className="text-[11px] uppercase tracking-wide text-slate-500">
-                    MCP servers
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleAddMcpServer}
-                    className="text-[11px] px-2 py-1 rounded-md border border-slate-700 hover:bg-slate-800"
-                  >
-                    + Add MCP server
-                  </button>
-                </div>
-
-                {mcpServersDraft.length === 0 ? (
-                  <div className="text-[11px] text-slate-500">
-                    No MCP servers configured yet. Use the Add MCP server button
-                    to create one.
-                  </div>
-                ) : (
                   <div className="space-y-3">
-                    {mcpServersDraft.map((server, index) => (
-                      <div
-                        key={server.id}
-                        className="border border-slate-800 rounded-md bg-slate-950/80 p-3 space-y-2"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex-1 space-y-1">
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="text"
-                                className="flex-1 bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
-                                placeholder="Server name"
-                                value={server.label}
-                                onChange={(e) =>
-                                  handleUpdateMcpServer(server.id, (s) => ({
-                                    ...s,
-                                    label: e.target.value,
-                                  }))
-                                }
-                              />
-                              <input
-                                type="text"
-                                className="w-40 bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
-                                placeholder="Server id"
-                                value={server.id}
-                                onChange={(e) =>
-                                  handleUpdateMcpServer(server.id, (s) => ({
-                                    ...s,
-                                    id: e.target.value || s.id,
-                                  }))
-                                }
-                              />
-                            </div>
-                            <div className="flex items-center gap-2 text-[10px] text-slate-500">
-                              <span>Server #{index + 1}</span>
-                              {server.type && <span>Type: {server.type}</span>}
-                            </div>
-                          </div>
-                          <label className="inline-flex items-center gap-1">
-                            <input
-                              type="checkbox"
-                              className="h-3 w-3"
-                              checked={server.enabled}
-                              onChange={(e) =>
-                                handleUpdateMcpServer(server.id, (s) => ({
-                                  ...s,
-                                  enabled: e.target.checked,
-                                }))
-                              }
-                            />
-                            <span className="text-[11px] text-slate-300">
-                              Enabled
-                            </span>
-                          </label>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteMcpServer(server.id)}
-                            className="text-[10px] px-2 py-0.5 rounded-md border border-red-700 text-red-300 hover:bg-red-900/40"
-                          >
-                            Delete
-                          </button>
-                        </div>
+                    <div className="space-y-2">
+                      <span className="text-[11px] uppercase tracking-wide text-slate-500">
+                        System prompt
+                      </span>
+                      <textarea
+                        className="mt-1 w-full min-h-[200px] bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs"
+                        value={activeConversation.settings.systemPrompt}
+                        onChange={(e) =>
+                          updateActiveConversation((conv) => ({
+                            ...conv,
+                            settings: {
+                              ...conv.settings,
+                              systemPrompt: e.target.value,
+                            },
+                          }))
+                        }
+                      />
+                    </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                          <div className="space-y-1">
-                            <div className="text-[10px] text-slate-500">
-                              Command
-                            </div>
-                            <input
-                              type="text"
-                              className="w-full bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
-                              placeholder="e.g. node"
-                              value={server.command}
-                              onChange={(e) =>
-                                handleUpdateMcpServer(server.id, (s) => ({
-                                  ...s,
-                                  command: e.target.value,
-                                }))
-                              }
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <div className="text-[10px] text-slate-500">
-                              Arguments
-                            </div>
-                            <input
-                              type="text"
-                              className="w-full bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
-                              placeholder="Space-separated arguments"
-                              value={server.args.join(" ")}
-                              onChange={(e) =>
-                                handleChangeMcpServerArgs(server.id, e.target.value)
-                              }
-                            />
-                          </div>
-                        </div>
+                    <div className="space-y-2">
+                      <span className="text-[11px] uppercase tracking-wide text-slate-500">
+                        Planner instructions
+                      </span>
+                      <textarea
+                        className="mt-1 w-full min-h-[200px] bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs"
+                        placeholder="High-level planning / decomposition guidance..."
+                        value={activeConversation.settings.plannerPrompt}
+                        onChange={(e) =>
+                          updateActiveConversation((conv) => ({
+                            ...conv,
+                            settings: {
+                              ...conv.settings,
+                              plannerPrompt: e.target.value,
+                            },
+                          }))
+                        }
+                      />
+                    </div>
 
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] text-slate-500">
-                              Environment / parameters
-                            </span>
+                    <div className="space-y-2">
+                      <span className="text-[11px] uppercase tracking-wide text-slate-500">
+                        Reflector / self-critique
+                      </span>
+                      <textarea
+                        className="mt-1 w-full min-h-[200px] bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs"
+                        placeholder="E.g. ask the model to critique its own reasoning..."
+                        value={activeConversation.settings.reflectorPrompt}
+                        onChange={(e) =>
+                          updateActiveConversation((conv) => ({
+                            ...conv,
+                            settings: {
+                              ...conv.settings,
+                              reflectorPrompt: e.target.value,
+                            },
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {configTab === "models" && (
+                <div className="space-y-4">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">
+                      OpenRouter API key
+                    </div>
+                    <div className="space-y-1">
+                      {userSettingsLoading ? (
+                        <div className="text-[11px] text-slate-500">
+                          Loading settings…
+                        </div>
+                      ) : (
+                        <>
+                          <div className="text-[11px] text-slate-400">
+                            {userSettings?.hasApiKey
+                              ? userSettings.apiKeyLast4
+                                ? `Key configured (ending in ${userSettings.apiKeyLast4}).`
+                                : "Key configured."
+                              : "No user-specific key stored. The server environment key will be used if configured."}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <input
+                              type="password"
+                              className="flex-1 bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs"
+                              placeholder="Enter new OpenRouter API key"
+                              value={apiKeyInput}
+                              onChange={(e) => setApiKeyInput(e.target.value)}
+                            />
                             <button
-                              type="button"
-                              onClick={() => handleAddMcpEnvVar(server.id)}
+                              onClick={() => void handleSaveApiKey()}
+                              disabled={apiKeySaving || !apiKeyInput.trim()}
+                              className="text-xs px-2 py-1 rounded-md border border-slate-700 hover:bg-slate-800 disabled:opacity-60"
+                            >
+                              Save
+                            </button>
+                            {userSettings?.hasApiKey && (
+                              <button
+                                onClick={() => void handleClearApiKey()}
+                                disabled={apiKeySaving}
+                                className="text-xs px-2 py-1 rounded-md border border-red-700 text-red-300 hover:bg-red-900/40 disabled:opacity-60"
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </div>
+                          {userSettingsError && (
+                            <div className="text-[11px] text-red-400">
+                              {userSettingsError}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">
+                      Your models
+                    </div>
+                    <div className="text-[11px] text-slate-400 mb-1">
+                      These models appear in the chat sidebar.
+                    </div>
+                    <div className="max-h-32 overflow-y-auto space-y-1 border border-slate-800 rounded-md p-2 bg-slate-950/60">
+                      {allModels.map((m) => (
+                        <div
+                          key={m.id}
+                          className="flex items-center justify-between gap-2"
+                        >
+                          <div>
+                            <div className="text-[11px]">
+                              {m.label}
+                              {selectedModel && selectedModel.id === m.id && (
+                                <span className="ml-1 text-[10px] text-sky-400">
+                                  (selected)
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-slate-500">
+                              {m.provider ?? "provider unknown"} • {m.id}
+                              {m.contextWindow
+                                ? ` • ${m.contextWindow.toLocaleString()} tokens`
+                                : ""}
+                            </div>
+                          </div>
+                          {m.origin === "custom" && (
+                            <button
+                              onClick={() => void handleRemoveCustomModel(m.id)}
                               className="text-[10px] px-2 py-0.5 rounded-md border border-slate-700 hover:bg-slate-800"
                             >
-                              + Add parameter
+                              Remove
                             </button>
-                          </div>
-                          {server.env.length === 0 ? (
-                            <div className="text-[11px] text-slate-500">
-                              No parameters configured.
-                            </div>
-                          ) : (
-                            <div className="space-y-1">
-                              {server.env.map((pair, envIndex) => (
-                                <div
-                                  key={`${server.id}-env-${envIndex}`}
-                                  className="flex items-center gap-2"
-                                >
-                                  <input
-                                    type="text"
-                                    className="w-40 bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
-                                    placeholder="KEY"
-                                    value={pair.key}
-                                    onChange={(e) =>
-                                      handleUpdateMcpEnvVar(
-                                        server.id,
-                                        envIndex,
-                                        "key",
-                                        e.target.value
-                                      )
-                                    }
-                                  />
-                                  <input
-                                    type="text"
-                                    className="flex-1 bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
-                                    placeholder="Value"
-                                    value={pair.value}
-                                    onChange={(e) =>
-                                      handleUpdateMcpEnvVar(
-                                        server.id,
-                                        envIndex,
-                                        "value",
-                                        e.target.value
-                                      )
-                                    }
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      handleRemoveMcpEnvVar(server.id, envIndex)
-                                    }
-                                    className="text-[10px] px-1.5 py-0.5 rounded-md border border-slate-700 hover:bg-slate-800"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
                           )}
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                      {allModels.length === 0 && (
+                        <div className="text-[11px] text-slate-500">
+                          No models configured.
+                        </div>
+                      )}
+                    </div>
                   </div>
-                )}
 
-                <div className="pt-2 border-t border-slate-800 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => void handleSaveMcpSettings()}
-                    className="text-xs px-3 py-1.5 rounded-md border border-slate-700 hover:bg-slate-800"
-                  >
-                    Save MCP settings
-                  </button>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[11px] uppercase tracking-wide text-slate-500">
+                        Browse OpenRouter models
+                      </span>
+                      {openRouterModelsLoading && (
+                        <span className="text-[10px] text-slate-400">
+                          Loading…
+                        </span>
+                      )}
+                    </div>
+                    {openRouterModelsError && (
+                      <div className="text-[11px] text-red-400 mb-1">
+                        {openRouterModelsError}
+                      </div>
+                    )}
+                    <input
+                      type="text"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs"
+                      placeholder="Search by name or id..."
+                      value={modelSearch}
+                      onChange={(e) => setModelSearch(e.target.value)}
+                    />
+                    <div className="mt-2 min-h-[32lh] max-h-[42lh] overflow-y-hidden overflow-y-scroll space-y-1 border border-slate-800 rounded-md p-2 bg-slate-950/60">
+                      {openRouterModels
+                        .filter((m) => {
+                          const q = modelSearch.trim().toLowerCase();
+                          if (!q) return true;
+                          const haystack = `${m.label} ${m.id} ${
+                            m.provider ?? ""
+                          }`.toLowerCase();
+                          return haystack.includes(q);
+                        })
+                        .slice(0, 50)
+                        .map((m) => (
+                          <div
+                            key={m.id}
+                            className="flex items-center justify-between gap-2"
+                          >
+                            <div>
+                              <div className="text-[11px] font-medium">
+                                {m.label}
+                              </div>
+                              <div className="text-[10px] text-slate-500">
+                                {m.provider ?? "provider"} • {m.id}
+                                {m.contextWindow
+                                  ? ` • ${m.contextWindow.toLocaleString()} tokens`
+                                  : ""}
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => void handleAddCustomModel(m)}
+                              className="text-[10px] px-2 py-0.5 rounded-md border border-slate-700 hover:bg-slate-800"
+                            >
+                              Add
+                            </button>
+                          </div>
+                        ))}
+                      {!openRouterModelsLoading &&
+                        openRouterModels.length === 0 && (
+                          <div className="text-[11px] text-slate-500">
+                            No models loaded yet. Ensure an OpenRouter API key is
+                            configured.
+                          </div>
+                        )}
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {configTab === "mcp" && (
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-wide text-slate-500">
+                          Model Context Protocol (MCP)
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          Enable MCP tools and configure MCP servers for this user.
+                        </div>
+                      </div>
+                      <label className="inline-flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="h-3 w-3"
+                          checked={mcpEnabledDraft}
+                          onChange={(e) => setMcpEnabledDraft(e.target.checked)}
+                        />
+                        <span className="text-[11px] text-slate-300">Enabled</span>
+                      </label>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] uppercase tracking-wide text-slate-500">
+                        MCP servers
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAddMcpServer}
+                        className="text-[11px] px-2 py-1 rounded-md border border-slate-700 hover:bg-slate-800"
+                      >
+                        + Add MCP server
+                      </button>
+                    </div>
+
+                    {mcpServersDraft.length === 0 ? (
+                      <div className="text-[11px] text-slate-500">
+                        No MCP servers configured yet. Use the Add MCP server
+                        button to create one.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {mcpServersDraft.map((server, index) => (
+                          <div
+                            key={server.id}
+                            className="border border-slate-800 rounded-md bg-slate-950/80 p-3 space-y-2"
+                          >
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  className="flex-1 bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
+                                  placeholder="Server name"
+                                  value={server.label}
+                                  onChange={(e) =>
+                                    handleUpdateMcpServer(server.id, (s) => ({
+                                      ...s,
+                                      label: e.target.value,
+                                    }))
+                                  }
+                                />
+                                <input
+                                  type="text"
+                                  className="w-40 bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
+                                  placeholder="Server id"
+                                  value={server.id}
+                                  onChange={(e) =>
+                                    handleUpdateMcpServer(server.id, (s) => ({
+                                      ...s,
+                                      id: e.target.value || s.id,
+                                    }))
+                                  }
+                                />
+                                <label className="inline-flex items-center gap-1 ml-2">
+                                  <input
+                                    type="checkbox"
+                                    className="h-3 w-3"
+                                    checked={server.enabled}
+                                    onChange={(e) =>
+                                      handleUpdateMcpServer(server.id, (s) => ({
+                                        ...s,
+                                        enabled: e.target.checked,
+                                      }))
+                                    }
+                                  />
+                                  <span className="text-[11px] text-slate-300">
+                                    Enabled
+                                  </span>
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteMcpServer(server.id)}
+                                  className="text-[10px] px-2 py-0.5 rounded-md border border-red-700 text-red-300 hover:bg-red-900/40"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                              <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                                <span>Server #{index + 1}</span>
+                                {server.type && <span>Type: {server.type}</span>}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                              <div className="space-y-1">
+                                <div className="text-[10px] text-slate-500">
+                                  Command
+                                </div>
+                                <input
+                                  type="text"
+                                  className="w-full bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
+                                  placeholder="e.g. node"
+                                  value={server.command}
+                                  onChange={(e) =>
+                                    handleUpdateMcpServer(server.id, (s) => ({
+                                      ...s,
+                                      command: e.target.value,
+                                    }))
+                                  }
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <div className="text-[10px] text-slate-500">
+                                  Arguments
+                                </div>
+                                <input
+                                  type="text"
+                                  className="w-full bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
+                                  placeholder="Space-separated arguments"
+                                  value={server.args.join(" ")}
+                                  onChange={(e) =>
+                                    handleChangeMcpServerArgs(
+                                      server.id,
+                                      e.target.value
+                                    )
+                                  }
+                                />
+                              </div>
+                            </div>
+
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] text-slate-500">
+                                  Environment / parameters
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddMcpEnvVar(server.id)}
+                                  className="text-[10px] px-2 py-0.5 rounded-md border border-slate-700 hover:bg-slate-800"
+                                >
+                                  + Add parameter
+                                </button>
+                              </div>
+                              {server.env.length === 0 ? (
+                                <div className="text-[11px] text-slate-500">
+                                  No parameters configured.
+                                </div>
+                              ) : (
+                                <div className="space-y-1">
+                                  {server.env.map((pair, envIndex) => (
+                                    <div
+                                      key={`${server.id}-env-${envIndex}`}
+                                      className="flex items-center gap-2"
+                                    >
+                                      <input
+                                        type="text"
+                                        className="w-40 bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
+                                        placeholder="KEY"
+                                        value={pair.key}
+                                        onChange={(e) =>
+                                          handleUpdateMcpEnvVar(
+                                            server.id,
+                                            envIndex,
+                                            "key",
+                                            e.target.value
+                                          )
+                                        }
+                                      />
+                                      <input
+                                        type="text"
+                                        className="flex-1 bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
+                                        placeholder="Value"
+                                        value={pair.value}
+                                        onChange={(e) =>
+                                          handleUpdateMcpEnvVar(
+                                            server.id,
+                                            envIndex,
+                                            "value",
+                                            e.target.value
+                                          )
+                                        }
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleRemoveMcpEnvVar(server.id, envIndex)
+                                        }
+                                        className="text-[10px] px-1.5 py-0.5 rounded-md border border-slate-700 hover:bg-slate-800"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="pt-2 border-t border-slate-800 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => void handleSaveMcpSettings()}
+                        className="text-xs px-3 py-1.5 rounded-md border border-slate-700 hover:bg-slate-800"
+                      >
+                        Save MCP settings
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
