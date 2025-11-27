@@ -49,10 +49,16 @@ class McpClientManager {
       throw new Error(`Unknown MCP server id: ${serverId}`);
     }
 
+    const baseEnv: Record<string, string> = Object.fromEntries(
+      Object.entries(process.env).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string"
+      )
+    );
+
     const transport = new StdioClientTransport({
       command: definition.command,
       args: definition.args,
-      env: definition.env ? { ...process.env, ...definition.env } : process.env,
+      env: definition.env ? { ...baseEnv, ...definition.env } : baseEnv,
     });
 
     const client = new Client(
