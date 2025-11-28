@@ -8,6 +8,7 @@ Agentic multi-conversation AI chat app with tools, per-conversation scratchpad, 
 - MongoDB for conversation, scratchpad, and log storage
 - OpenRouter (OpenAI-compatible) for model access
 - `tiktoken` for accurate server-side token counting
+- MCP client foundation using the Model Context Protocol (MCP) SDK for connecting to external tools via stdio
 
 ## Features
 
@@ -91,18 +92,99 @@ npm run dev
 - You can save / load presets (System / Planner / Reflector) per browser.
 - Presets are stored in `localStorage` under `llm-chat-prompt-presets`.
 
-## Configuration & provider manager
+## Configuration: prompts, models, MCP
 
 - Click the small **gear icon (⚙)** in the top-right of the chat view to open a full-screen configuration modal.
-- The **Prompts** section lets you:
-  - Edit the System prompt, Planner instructions, and Reflector / self-critique prompt.
-  - Save the current prompt set as a preset and re-apply presets across conversations.
-- The **Provider manager** section lets you:
-  - Store an OpenRouter API key per user in the `user_settings` collection (the environment `OPENROUTER_API_KEY` is used as a fallback).
-  - Browse and search models from OpenRouter (via `/api/openrouter-models`) and add them to your personal model list.
-  - See provider and context window information for each model.
-  - Remove custom models from your list.
-- The combined list of default and custom models is available in the left sidebar **Model** selector for each conversation.
+- The modal is organized into three tabs:
+
+  - **Prompts**
+    - Edit the System prompt, Planner instructions, and Reflector / self-critique prompt for the *active conversation*.
+    - Save the current prompt set as a preset and re-apply presets across conversations.
+
+  - **Models & provider**
+    - Store an OpenRouter API key per user in the `user_settings` collection (the environment `OPENROUTER_API_KEY` is used as a fallback).
+    - Browse and search models from OpenRouter (via `/api/openrouter-models`) and add them to your personal model list.
+    - See provider and context window information for each model.
+    - Remove custom models from your list.
+    - The combined list of default and custom models is available in the left sidebar **Model** selector for each conversation.
+
+  - **MCP** (Model Context Protocol)
+    - Enable or disable MCP usage for the current user.
+    - Configure one or more MCP servers that Veilfire Chat can connect to via stdio.
+    - Each server definition includes:
+      - A stable `id` used internally.
+      - A human-friendly label.
+      - A `command` and `args[]` to start the MCP server process.
+      - Optional environment/parameter key–value pairs (merged into the child process environment).
+    - MCP server definitions are stored per user in the `user_settings` collection alongside provider settings.
+    - **Note:** the app does not ship any MCP servers. You must install and configure your own MCP-compatible servers on the host where Veilfire runs.
+
+## MCP quick start
+
+Veilfire Chat includes an MCP client manager (see `lib/mcpClient.ts`) that can connect to one or more MCP servers over stdio using the official `@modelcontextprotocol/sdk`.
+
+At the moment, MCP integration focuses on **configuration and connection management**:
+
+- Per-user MCP server definitions are stored in MongoDB (`user_settings` collection) via `/api/user-settings`.
+- The MCP tab in the config modal lets you manage these definitions without editing JSON by hand.
+- Future work will expose MCP tools directly to the model via the OpenAI tools API in `/api/chat`.
+
+### 1. Prerequisites
+
+- One or more MCP-compatible servers installed on the same host where Veilfire runs.
+- Each server must support **stdio transport** (read/write on stdin/stdout).
+- You should be able to start your server from the command line, e.g.:
+
+  ```bash
+  node path/to/your-mcp-server.js
+  # or
+  ./your-mcp-server-binary --flag value
+  ```
+
+### 2. Add an MCP server in the UI
+
+1. Log in to Veilfire Chat.
+2. Click the **⚙ Configuration** button in the top-right.
+3. Open the **MCP** tab.
+4. Turn on the **Enabled** toggle.
+5. Click **+ Add MCP server** and fill in:
+   - **Server id** – a stable identifier, e.g. `filesystem-mcp`.
+   - **Server name** – any human-friendly label.
+   - **Command** – the binary or interpreter, e.g. `node` or `/usr/local/bin/your-mcp-server`.
+   - **Arguments** – space-separated args, e.g. `path/to/server.js --flag value`.
+   - **Environment / parameters** – optional key–value pairs required by the server (API keys, config flags, etc.).
+6. Click **Save MCP settings**.
+
+This creates (or updates) a per-user entry in `user_settings` that looks conceptually like:
+
+```json
+{
+  "mcpEnabled": true,
+  "mcpServers": [
+    {
+      "id": "filesystem-mcp",
+      "label": "Filesystem MCP server",
+      "enabled": true,
+      "type": "custom",
+      "command": "node",
+      "args": ["/path/to/your-mcp-server.js", "--flag", "value"],
+      "env": {
+        "SOME_SERVER_SPECIFIC_KEY": "value"
+      }
+    }
+  ]
+}
+```
+
+> The UI represents `env` as a list of key–value rows; the backend normalizes this to a simple object.
+
+### 3. How the MCP client uses this config
+
+- The server-side MCP client manager (`mcpClientManager` in `lib/mcpClient.ts`) uses the per-user `mcpServers` definitions to spawn stdio transports via `StdioClientTransport`.
+- When connecting to a server, Veilfire merges a filtered copy of `process.env` with the configured MCP server env/parameters and passes that as the child process environment.
+- Each server is keyed by its `id`; the MCP client reuses connections on subsequent calls instead of spawning new processes repeatedly.
+
+Future work will wire these MCP servers into `/api/chat` so that declared MCP tools appear as OpenAI-compatible tools for the model.
 
 ## File uploads
 
@@ -183,7 +265,7 @@ docker compose down
 ## Coming soon
 
 - More tools!
-- MCP Client
+- MCP tools exposed directly to the model via the OpenAI tools API
 - Embedding model support which will feed into...
 - VectorDB integration for RAG capabilities
 
