@@ -303,7 +303,7 @@ With this setup:
 
 - Upload button next to the send button.
 - `txt` / `csv` contents are inlined into a system message (preview truncated).
-- PDFs / Excel / images are attached as metadata only in this MVP.
+- PDFs / Excel / images are attached as metadata only at this time. Feature will be completed soon.
 
 ## Logging
 
