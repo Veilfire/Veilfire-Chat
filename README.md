@@ -16,6 +16,7 @@ Agentic multi-conversation AI chat app with tools, per-conversation scratchpad, 
 - **Agentic tools** exposed to the model via OpenAI-compatible tools API:
   - `get_scratchpad` / `set_scratchpad` for per-conversation working memory.
   - `get_utc_time` backed by https://www.timeapi.io for precise UTC time.
+  - `http_request` via the Web Client, enforcing per-user HTTP domain/method policies and optional secrets.
 - **Scratchpad UX**:
   - Floating, draggable scratchpad widget that appears when the model uses the scratchpad.
   - Per-response scratchpad icon and modal to inspect the latest scratchpad content.
@@ -92,10 +93,10 @@ npm run dev
 - You can save / load presets (System / Planner / Reflector) per browser.
 - Presets are stored in `localStorage` under `llm-chat-prompt-presets`.
 
-## Configuration: prompts, models, MCP
+## Configuration: prompts, models, MCP, Web Client
 
 - Click the small **gear icon (⚙)** in the top-right of the chat view to open a full-screen configuration modal.
-- The modal is organized into three tabs:
+- The modal is organized into four tabs:
 
   - **Prompts**
     - Edit the System prompt, Planner instructions, and Reflector / self-critique prompt for the *active conversation*.
@@ -118,6 +119,15 @@ npm run dev
       - Optional environment/parameter key–value pairs (merged into the child process environment).
     - MCP server definitions are stored per user in the `user_settings` collection alongside provider settings.
     - **Note:** the app does not ship any MCP servers. You must install and configure your own MCP-compatible servers on the host where Veilfire runs.
+  - **Web Client** (HTTP tool)
+    - Enable or disable the HTTP Web Client tool for the current user.
+    - Enforce a **domain whitelist** so the model can only call HTTP APIs you explicitly allow.
+    - Toggle **local network access** on or off (localhost and private IP ranges are blocked by default).
+    - Manage a list of domains with:
+      - Enabled flag.
+      - Per-domain allowed HTTP methods (GET/HEAD/OPTIONS/POST/PUT/PATCH/DELETE).
+      - Optional secret with an "allow model access" toggle.
+    - Web Client settings are stored per user in the `user_settings` collection.
 
 ## MCP quick start
 
@@ -185,6 +195,109 @@ This creates (or updates) a per-user entry in `user_settings` that looks concept
 - Each server is keyed by its `id`; the MCP client reuses connections on subsequent calls instead of spawning new processes repeatedly.
 
 Future work will wire these MCP servers into `/api/chat` so that declared MCP tools appear as OpenAI-compatible tools for the model.
+
+## Web Client HTTP tool
+
+The Web Client exposes a single HTTP tool, `http_request`, to the model. It allows the assistant to call external HTTP APIs under strict, per-user policies.
+
+### 1. Configuring the Web Client
+
+Open the configuration modal (⚙) and the **Web Client** tab. For each user you can configure:
+
+- **Enabled** – master toggle for the Web Client tool. When disabled, `http_request` always returns an error.
+- **Enforce domain whitelist** – when on (recommended), requests are only allowed to domains that:
+  - Appear in the domain list, and
+  - Are marked as **Enabled**.
+- **Allow local network (LAN) access** – when off (default), requests to localhost / loopback and private IP ranges are blocked:
+  - `127.0.0.0/8`, `::1`, `localhost`.
+  - `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`.
+
+For each domain entry you can set:
+
+- **Domain** – hostname only (e.g. `example.com` or `api.example.com`). Protocol, port, path and query are ignored when matching.
+- **Enabled** – if turned off, that domain is treated as not whitelisted.
+- **Allowed HTTP methods** – one or more of `GET`, `HEAD`, `OPTIONS`, `POST`, `PUT`, `PATCH`, `DELETE`.
+- **Secret (optional)** – an opaque value stored only on the server.
+  - The UI never shows the secret after saving.
+  - Secrets are never returned in tool results or sent to the model.
+  - When **Allow HTTP tool to send this secret** is enabled, the secret is sent as an `Authorization: Bearer ...` header for matching domains.
+
+### 2. How `http_request` works
+
+- The tool definition includes:
+  - `url` (string, required) – must be `http` or `https`.
+  - `method` (string, required) – one of the allowed HTTP methods.
+  - `headers` (object, optional) – string-to-string map of extra headers (excluding `Host`, `Content-Length`, and `Authorization`).
+  - `body` (string, optional) – raw request body (for JSON APIs, the model sends a JSON string and a `Content-Type` header).
+- Before making a request, the backend:
+  - Verifies that the Web Client is enabled for the user.
+  - Blocks non-HTTP(S) URLs.
+  - Applies the **local network** rule.
+  - Applies the **domain whitelist** and enabled flag (when enforcement is on).
+  - Checks the **per-domain allowed methods** for the target domain.
+  - Attaches a Bearer token from the configured secret only when:
+    - The domain matches, and
+    - `allowModelAccess` is enabled for that secret, and
+    - A non-empty secret value is stored.
+- Responses are normalized to a compact JSON object:
+  - `ok` – boolean indicating success.
+  - `status`, `statusText`, `url`.
+  - `headers` – response headers as a string map.
+  - `body` – response body as text, truncated to a safe length.
+  - `truncated` – whether the body was truncated.
+
+### 3. Safety notes and limitations
+
+- Keep **Enforce domain whitelist** enabled whenever possible.
+- Only enable **Allow local network access** if you understand the implications and trust the assistant with your LAN.
+- Use per-domain methods to limit risky verbs like `POST`, `PUT`, and `DELETE`.
+- Store long-lived API keys or tokens as Web Client secrets instead of including them directly in prompts or tool calls.
+- The Web Client is **not a full browser**:
+  - No JavaScript execution, DOM rendering, or cookies.
+  - Each request is stateless and independent.
+- Each HTTP request has a **timeout** (about 15 seconds). Slow or hanging endpoints will return a timeout error.
+- Response bodies are **truncated** to a safe length (roughly tens of thousands of characters). Very long pages will be cut off.
+- The assistant can treat a whitelisted search engine (for example, `google.com`) as a **limited search capability**, but:
+  - It only sees the raw HTML returned by that search request.
+  - It cannot automatically "browse" into result links unless their domains are also whitelisted or you disable whitelist enforcement.
+
+### 4. Web Client quick start
+
+#### 4.1 Simple API call
+
+1. Open the **Web Client** tab in the configuration modal (⚙).
+2. Ensure **Enabled** is on and **Enforce domain whitelist** is on.
+3. Add a domain entry, for example:
+   - Domain: `api.example.com`
+   - Enabled: on
+   - Allowed HTTP methods: `GET` and `POST`
+4. (Optional) Add a secret (for example, an API key) and turn on **Allow HTTP tool to send this secret**.
+
+Example prompt the model can follow:
+
+> "Use your HTTP capability to POST a JSON payload to https://api.example.com/analyze with `{ \"text\": \"...\" }`, then summarize the JSON response."
+
+The model will internally call `http_request` with the appropriate URL, method, headers, and body, respecting the domain/method/secret configuration.
+
+#### 4.2 Using a search engine as a constrained search tool
+
+To let the assistant perform general web searches within limits:
+
+1. In the **Web Client** tab, add a domain such as `google.com` (or another search provider you trust).
+2. Enable the domain and allow at least the `GET` method.
+3. Keep **Enforce domain whitelist** on so follow-up requests remain constrained.
+
+Example prompt the model can follow:
+
+> "Use your HTTP capability to search Google for `latest TypeScript 5.7 features` and summarize the top 3 results, including URLs and key points."
+
+With this setup:
+
+- The assistant can issue a GET request to a Google search URL and parse the HTML results.
+- It can quote snippets, titles, and URLs from that page.
+- It **cannot** automatically fetch the contents of arbitrary result links on other domains unless you:
+  - Add those domains to the whitelist, or
+  - Temporarily disable **Enforce domain whitelist** (which makes HTTP calls unrestricted except for the local-network rule).
 
 ## File uploads
 
@@ -265,7 +378,6 @@ docker compose down
 ## Coming soon
 
 - More tools!
-- MCP tools exposed directly to the model via the OpenAI tools API
 - Embedding model support which will feed into...
 - VectorDB integration for RAG capabilities
 

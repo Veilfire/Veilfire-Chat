@@ -11,6 +11,105 @@ export const runtime = "nodejs";
 
 const DB_NAME = process.env.MONGODB_DB || "veilfire_chat";
 
+type HttpMethod =
+  | "GET"
+  | "HEAD"
+  | "OPTIONS"
+  | "POST"
+  | "PUT"
+  | "PATCH"
+  | "DELETE";
+
+interface WebClientSecretDoc {
+  allowModelAccess?: boolean;
+  value?: string | null;
+}
+
+interface WebClientDomainDoc {
+  id: string;
+  domain: string;
+  enabled?: boolean;
+  methods?: HttpMethod[];
+  secret?: WebClientSecretDoc;
+}
+
+interface UserSettingsDocForChat {
+  openRouterApiKey?: string | null;
+  webClientEnabled?: boolean;
+  webClientEnforceWhitelist?: boolean;
+  webClientAllowLocalNetwork?: boolean;
+  webClientDomains?: WebClientDomainDoc[];
+}
+
+const HTTP_METHODS: HttpMethod[] = [
+  "GET",
+  "HEAD",
+  "OPTIONS",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+];
+
+function isValidHttpMethod(value: unknown): value is HttpMethod {
+  return typeof value === "string" && HTTP_METHODS.includes(value as HttpMethod);
+}
+
+function isPrivateIp(hostname: string): boolean {
+  const ipv4Match = hostname.match(
+    /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/
+  );
+  if (!ipv4Match) {
+    return false;
+  }
+  const octets = ipv4Match.slice(1).map((part) => Number(part));
+  if (octets.some((o) => Number.isNaN(o) || o < 0 || o > 255)) {
+    return false;
+  }
+  const [a, b] = octets;
+  return (
+    a === 10 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    a === 127 ||
+    (a === 169 && b === 254)
+  );
+}
+
+function isLocalNetworkHost(hostname: string): boolean {
+  const lower = hostname.toLowerCase();
+  if (
+    lower === "localhost" ||
+    lower === "127.0.0.1" ||
+    lower === "::1" ||
+    lower.endsWith(".localhost")
+  ) {
+    return true;
+  }
+  return isPrivateIp(lower);
+}
+
+function findMatchingWebClientDomain(
+  host: string,
+  domains: WebClientDomainDoc[] | undefined | null
+): WebClientDomainDoc | null {
+  if (!Array.isArray(domains) || domains.length === 0) {
+    return null;
+  }
+  const hostname = host.toLowerCase();
+  let best: WebClientDomainDoc | null = null;
+  for (const d of domains) {
+    if (!d || !d.domain) continue;
+    const cand = d.domain.toLowerCase();
+    if (hostname === cand || hostname.endsWith(`.${cand}`)) {
+      if (!best || cand.length > (best.domain?.length ?? 0)) {
+        best = d;
+      }
+    }
+  }
+  return best;
+}
+
 // Base system prompt for Veilfire Chat. This is immutable from the
 // user's perspective and defines core behavior, safety, and tool usage.
 // The user-editable "system prompt" in the UI is treated as a
@@ -60,7 +159,7 @@ export async function POST(req: NextRequest) {
 
   const settingsDoc = (await db
     .collection("user_settings")
-    .findOne({ userId })) as { openRouterApiKey?: string | null } | null;
+    .findOne({ userId })) as UserSettingsDocForChat | null;
 
   const userKey = settingsDoc?.openRouterApiKey ?? null;
   const apiKeyToUse = userKey || process.env.OPENROUTER_API_KEY;
@@ -122,7 +221,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 4) Scratchpad tool guidance.
+  // 4) Tool guidance (scratchpad, time, and Web Client HTTP tool).
   systemParts.push(
     [
       "You have access to the following tools for per-conversation working memory (scratchpad):",
@@ -140,6 +239,13 @@ export async function POST(req: NextRequest) {
       "- Time zone: <timeZone>",
       "- Daylight saving in region: <hasDayLightSaving>",
       "- Daylight saving currently active: <isDayLightSavingActive>",
+      "",
+      "You also have access to a Web Client HTTP tool that can call external HTTP APIs on behalf of the user.",
+      "- It can only call http/https URLs.",
+      "- It is restricted by the user's Web Client configuration: domain whitelist, allowed HTTP methods per domain, and a toggle for local network access.",
+      "- Some domains may have a secret configured which is automatically sent as an Authorization: Bearer token when allowed; you must never expose this secret back to the user.",
+      "- You do not have general web browsing or arbitrary search. Use the HTTP tool only when an external HTTP request is clearly needed.",
+      "- When the user asks what capabilities you have, you may describe that you can make limited HTTP API calls to configured domains, but you must not mention function or tool names directly.",
     ].join("\n")
   );
 
@@ -233,6 +339,192 @@ export async function POST(req: NextRequest) {
           };
         }
       }
+      case "http_request": {
+        const webClientEnabled = !!settingsDoc?.webClientEnabled;
+        if (!webClientEnabled) {
+          return {
+            ok: false,
+            error: "Web Client tool is disabled for this user.",
+          };
+        }
+
+        const rawUrl =
+          (args && typeof args.url === "string" && args.url.trim()) || "";
+        if (!rawUrl) {
+          return {
+            ok: false,
+            error: "Missing or empty 'url' parameter.",
+          };
+        }
+
+        let url: URL;
+        try {
+          url = new URL(rawUrl);
+        } catch {
+          return {
+            ok: false,
+            error: "Invalid URL. Must be a valid http or https URL.",
+          };
+        }
+
+        if (url.protocol !== "http:" && url.protocol !== "https:") {
+          return {
+            ok: false,
+            error: "Only http and https URLs are allowed.",
+          };
+        }
+
+        const rawMethod =
+          (args &&
+            typeof args.method === "string" &&
+            args.method.toUpperCase()) || "GET";
+        if (!isValidHttpMethod(rawMethod)) {
+          return {
+            ok: false,
+            error:
+              "Invalid HTTP method. Must be one of GET, HEAD, OPTIONS, POST, PUT, PATCH, DELETE.",
+          };
+        }
+        const method: HttpMethod = rawMethod;
+
+        const hostname = url.hostname.toLowerCase();
+        const allowLocalNetwork = !!settingsDoc?.webClientAllowLocalNetwork;
+        if (!allowLocalNetwork && isLocalNetworkHost(hostname)) {
+          return {
+            ok: false,
+            error:
+              "Request blocked: local network and loopback targets are disabled for this user.",
+          };
+        }
+
+        const enforceWhitelist =
+          typeof settingsDoc?.webClientEnforceWhitelist === "boolean"
+            ? settingsDoc.webClientEnforceWhitelist
+            : true;
+
+        const allDomains = Array.isArray(settingsDoc?.webClientDomains)
+          ? settingsDoc!.webClientDomains
+          : [];
+        const matched = findMatchingWebClientDomain(hostname, allDomains);
+        const effectiveDomain =
+          matched && matched.enabled !== false ? matched : null;
+
+        if (enforceWhitelist && !effectiveDomain) {
+          return {
+            ok: false,
+            error:
+              "Request blocked: target domain is not enabled in the Web Client whitelist for this user.",
+          };
+        }
+
+        if (effectiveDomain) {
+          const methodsForDomain =
+            Array.isArray(effectiveDomain.methods) &&
+            effectiveDomain.methods.length > 0
+              ? effectiveDomain.methods
+              : (["GET"] as HttpMethod[]);
+          if (!methodsForDomain.includes(method)) {
+            return {
+              ok: false,
+              error:
+                "Request blocked: HTTP method is not allowed for this domain in the Web Client configuration.",
+            };
+          }
+        }
+
+        let body: string | undefined;
+        const bodyArg =
+          (args && (args as Record<string, unknown>).body) ?? undefined;
+        if (typeof bodyArg === "string") {
+          body = bodyArg;
+        } else if (bodyArg && typeof bodyArg === "object") {
+          try {
+            body = JSON.stringify(bodyArg);
+          } catch {
+            body = undefined;
+          }
+        }
+
+        const headersArg = (args &&
+          (args as Record<string, unknown>).headers) as
+          | Record<string, unknown>
+          | undefined;
+        const headers: Record<string, string> = {};
+        if (headersArg && typeof headersArg === "object") {
+          for (const [key, value] of Object.entries(headersArg)) {
+            if (typeof value !== "string") continue;
+            const lower = key.toLowerCase();
+            if (lower === "host" || lower === "content-length") continue;
+            if (lower === "authorization") continue;
+            headers[key] = value;
+          }
+        }
+
+        let secretValue: string | null = null;
+        const secretDoc = effectiveDomain?.secret;
+        const allowModelAccessSecret =
+          !!secretDoc && secretDoc.allowModelAccess === true;
+        if (
+          allowModelAccessSecret &&
+          typeof secretDoc?.value === "string" &&
+          secretDoc.value.trim()
+        ) {
+          secretValue = secretDoc.value.trim();
+        }
+
+        if (secretValue) {
+          headers.Authorization = `Bearer ${secretValue}`;
+        }
+
+        const controller = new AbortController();
+        const timeoutMs = 15000;
+        const timeoutId = setTimeout(() => {
+          controller.abort();
+        }, timeoutMs);
+
+        try {
+          const res = await fetch(url.toString(), {
+            method,
+            headers,
+            body,
+            redirect: "follow",
+            signal: controller.signal,
+          });
+
+          const headersOut: Record<string, string> = {};
+          res.headers.forEach((value, key) => {
+            headersOut[key] = value;
+          });
+
+          const rawBody = await res.text();
+          const maxChars = 32_768;
+          const truncated = rawBody.length > maxChars;
+          const bodyOut = truncated ? rawBody.slice(0, maxChars) : rawBody;
+
+          return {
+            ok: true,
+            url: res.url,
+            status: res.status,
+            statusText: res.statusText,
+            headers: headersOut,
+            body: bodyOut,
+            truncated,
+          };
+        } catch (err) {
+          if (err instanceof Error && err.name === "AbortError") {
+            return {
+              ok: false,
+              error: "Request timed out while calling the target URL.",
+            };
+          }
+          return {
+            ok: false,
+            error: "Exception while calling target URL.",
+          };
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      }
       default:
         return { error: `Unknown tool: ${name}` };
     }
@@ -273,6 +565,49 @@ export async function POST(req: NextRequest) {
         type: "object",
         properties: {},
         required: [],
+      },
+    },
+    {
+      name: "http_request",
+      description:
+        "Perform an HTTP request using the per-user Web Client configuration. Respects the user's domain whitelist, allowed methods, local network toggle, and optional per-domain secrets.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: {
+            type: "string",
+            description:
+              "The full URL to request (must be http or https). Do not include secrets directly in the URL or headers.",
+          },
+          method: {
+            type: "string",
+            description:
+              "HTTP method to use. Must be one of GET, HEAD, OPTIONS, POST, PUT, PATCH, or DELETE.",
+            enum: [
+              "GET",
+              "HEAD",
+              "OPTIONS",
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE",
+            ],
+          },
+          headers: {
+            type: "object",
+            description:
+              "Optional HTTP headers to send. Values must be strings. Do not include Authorization headers when a secret is configured; the system will attach them automatically as a Bearer token.",
+            additionalProperties: {
+              type: "string",
+            },
+          },
+          body: {
+            type: "string",
+            description:
+              "Optional request body for methods like POST or PUT. For JSON APIs, send a JSON-encoded string and set the appropriate Content-Type header.",
+          },
+        },
+        required: ["url", "method"],
       },
     },
   ] as const;
@@ -356,10 +691,7 @@ export async function POST(req: NextRequest) {
       const { name, arguments: rawArgs } = msg.function_call;
       let parsed: Record<string, unknown> = {};
       try {
-        parsed =
-          typeof rawArgs === "string" && rawArgs.trim()
-            ? JSON.parse(rawArgs)
-            : rawArgs || {};
+        parsed = rawArgs.trim() ? JSON.parse(rawArgs) : {};
       } catch {
         parsed = {};
       }
@@ -417,7 +749,7 @@ export async function POST(req: NextRequest) {
   if (!toolsUsedForThisRun.has("scratchpad") && finalContent) {
     try {
       const pattern =
-        /set_scratchpad\s*\(\s*{[^}]*content\s*:\s*"([^\"]*)"[^}]*}\s*\)/;
+        /set_scratchpad\s*\(\s*{[^}]*content\s*:\s*"([^"]*)"[^}]*}\s*\)/;
       const match = finalContent.match(pattern);
       if (match && match[1] != null) {
         const fallbackContent = match[1];

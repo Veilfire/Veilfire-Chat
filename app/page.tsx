@@ -48,12 +48,48 @@ interface McpServerConfigState {
   env: McpServerEnvVar[];
 }
 
+type HttpMethod =
+  | "GET"
+  | "HEAD"
+  | "OPTIONS"
+  | "POST"
+  | "PUT"
+  | "PATCH"
+  | "DELETE";
+
+interface WebClientDomainState {
+  id: string;
+  domain: string;
+  enabled: boolean;
+  methods: HttpMethod[];
+  hasSecret: boolean;
+  allowModelAccess: boolean;
+}
+
+interface WebClientDomainDraft extends WebClientDomainState {
+  secretInput: string;
+}
+
+const WEB_CLIENT_HTTP_METHODS: HttpMethod[] = [
+  "GET",
+  "HEAD",
+  "OPTIONS",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+];
+
 interface UserSettingsState {
   hasApiKey: boolean;
   apiKeyLast4: string | null;
   customModels: ModelConfig[];
   mcpEnabled: boolean;
   mcpServers: McpServerConfig[];
+  webClientEnabled: boolean;
+  webClientEnforceWhitelist: boolean;
+  webClientAllowLocalNetwork: boolean;
+  webClientDomains: WebClientDomainState[];
 }
 
 const PRESETS_STORAGE_KEY = "llm-chat-prompt-presets";
@@ -149,9 +185,18 @@ export default function HomePage() {
     []
   );
 
-  const [configTab, setConfigTab] = useState<"prompts" | "models" | "mcp">(
-    "prompts"
-  );
+  const [webClientEnabledDraft, setWebClientEnabledDraft] = useState(false);
+  const [webClientEnforceWhitelistDraft, setWebClientEnforceWhitelistDraft] =
+    useState(true);
+  const [webClientAllowLocalNetworkDraft, setWebClientAllowLocalNetworkDraft] =
+    useState(false);
+  const [webClientDomainsDraft, setWebClientDomainsDraft] = useState<
+    WebClientDomainDraft[]
+  >([]);
+
+  const [configTab, setConfigTab] = useState<
+    "prompts" | "models" | "mcp" | "webClient"
+  >("prompts");
 
   const [openRouterModels, setOpenRouterModels] = useState<ModelConfig[]>([]);
   const [openRouterModelsLoading, setOpenRouterModelsLoading] =
@@ -419,6 +464,10 @@ export default function HomePage() {
     if (!userSettings) {
       setMcpEnabledDraft(false);
       setMcpServersDraft([]);
+      setWebClientEnabledDraft(false);
+      setWebClientEnforceWhitelistDraft(true);
+      setWebClientAllowLocalNetworkDraft(false);
+      setWebClientDomainsDraft([]);
       return;
     }
 
@@ -444,6 +493,27 @@ export default function HomePage() {
       : [];
 
     setMcpServersDraft(normalizedServers);
+
+    setWebClientEnabledDraft(userSettings.webClientEnabled ?? false);
+    setWebClientEnforceWhitelistDraft(userSettings.webClientEnforceWhitelist);
+    setWebClientAllowLocalNetworkDraft(
+      userSettings.webClientAllowLocalNetwork
+    );
+
+    const normalizedWebDomains: WebClientDomainDraft[] = Array.isArray(
+      userSettings.webClientDomains
+    )
+      ? userSettings.webClientDomains.map((domain) => ({
+          ...domain,
+          methods:
+            Array.isArray(domain.methods) && domain.methods.length > 0
+              ? domain.methods
+              : (["GET"] as HttpMethod[]),
+          secretInput: "",
+        }))
+      : [];
+
+    setWebClientDomainsDraft(normalizedWebDomains);
   }, [userSettings]);
 
   const allModels = useMemo(() => {
@@ -654,6 +724,130 @@ export default function HomePage() {
       setUserSettings(data);
     } catch {
       setUserSettingsError("Failed to save MCP settings.");
+    }
+  };
+
+  const handleAddWebClientDomain = () => {
+    const id = `web-domain-${Date.now()}`;
+    setWebClientDomainsDraft((prev) => [
+      ...prev,
+      {
+        id,
+        domain: "",
+        enabled: true,
+        methods: (["GET"] as HttpMethod[]),
+        hasSecret: false,
+        allowModelAccess: false,
+        secretInput: "",
+      },
+    ]);
+  };
+
+  const handleUpdateWebClientDomain = (
+    id: string,
+    updater: (domain: WebClientDomainDraft) => WebClientDomainDraft
+  ) => {
+    setWebClientDomainsDraft((prev) =>
+      prev.map((domain) => (domain.id === id ? updater(domain) : domain))
+    );
+  };
+
+  const handleRemoveWebClientDomain = (id: string) => {
+    setWebClientDomainsDraft((prev) =>
+      prev.filter((domain) => domain.id !== id)
+    );
+  };
+
+  const handleToggleWebClientDomainMethod = (id: string, method: HttpMethod) => {
+    handleUpdateWebClientDomain(id, (domain) => {
+      const has = domain.methods.includes(method);
+      let nextMethods: HttpMethod[];
+      if (has) {
+        nextMethods = domain.methods.filter((m) => m !== method);
+        if (nextMethods.length === 0) {
+          nextMethods = ["GET"] as HttpMethod[];
+        }
+      } else {
+        nextMethods = [...domain.methods, method];
+      }
+      return {
+        ...domain,
+        methods: nextMethods,
+      };
+    });
+  };
+
+  const handleSaveWebClientSettings = async () => {
+    setUserSettingsError(null);
+    try {
+      const cleanedDomains = webClientDomainsDraft
+        .map((domain) => {
+          const trimmedDomain = domain.domain.trim();
+          if (!trimmedDomain) {
+            return null;
+          }
+
+          const uniqueMethods = Array.from(
+            new Set(
+              domain.methods.filter((m) =>
+                WEB_CLIENT_HTTP_METHODS.includes(m)
+              )
+            )
+          ) as HttpMethod[];
+
+          const methodsToSend =
+            uniqueMethods.length > 0
+              ? uniqueMethods
+              : (["GET"] as HttpMethod[]);
+
+          const secretValue = domain.secretInput.trim();
+          const hasExistingOrNewSecret =
+            domain.hasSecret || !!secretValue || domain.allowModelAccess;
+
+          const secret = hasExistingOrNewSecret
+            ? {
+                allowModelAccess: domain.allowModelAccess,
+                ...(secretValue ? { value: secretValue } : {}),
+              }
+            : undefined;
+
+          return {
+            id: domain.id,
+            domain: trimmedDomain,
+            enabled: domain.enabled,
+            methods: methodsToSend,
+            ...(secret ? { secret } : {}),
+          };
+        })
+        .filter((d) => d !== null)
+        .map(
+          (d) =>
+            d as {
+              id: string;
+              domain: string;
+              enabled: boolean;
+              methods: HttpMethod[];
+              secret?: { allowModelAccess?: boolean; value?: string };
+            }
+        );
+
+      const res = await fetch("/api/user-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          webClientEnabled: webClientEnabledDraft,
+          webClientEnforceWhitelist: webClientEnforceWhitelistDraft,
+          webClientAllowLocalNetwork: webClientAllowLocalNetworkDraft,
+          webClientDomains: cleanedDomains,
+        }),
+      });
+      if (!res.ok) {
+        throw new Error(`Failed to save Web Client settings: ${res.status}`);
+      }
+      const data = (await res.json()) as UserSettingsState;
+      setUserSettings(data);
+    } catch {
+      setUserSettingsError("Failed to save Web Client settings.");
     }
   };
 
@@ -2036,6 +2230,17 @@ export default function HomePage() {
                 >
                   MCP
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setConfigTab("webClient")}
+                  className={`px-2 py-1 rounded-md text-[11px] border ${
+                    configTab === "webClient"
+                      ? "border-slate-500 bg-slate-900 text-slate-100"
+                      : "border-slate-800 text-slate-400 hover:bg-slate-900/40"
+                  }`}
+                >
+                  Web Client
+                </button>
               </div>
 
               {configTab === "prompts" && (
@@ -2269,7 +2474,7 @@ export default function HomePage() {
                       value={modelSearch}
                       onChange={(e) => setModelSearch(e.target.value)}
                     />
-                    <div className="mt-2 min-h-[32lh] max-h-[42lh] overflow-y-hidden overflow-y-scroll space-y-1 border border-slate-800 rounded-md p-2 bg-slate-950/60">
+                    <div className="mt-2 min-h-[32lh] max-h-[42lh] overflow-y-scroll space-y-1 border border-slate-800 rounded-md p-2 bg-slate-950/60">
                       {openRouterModels
                         .filter((m) => {
                           const q = modelSearch.trim().toLowerCase();
@@ -2537,6 +2742,277 @@ export default function HomePage() {
                         Save MCP settings
                       </button>
                     </div>
+                  </div>
+                </div>
+              )}
+              {configTab === "webClient" && (
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-wide text-slate-500">
+                          Web Client (HTTP tool)
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          Control which HTTP domains and methods this users
+                          conversations can access, and configure optional
+                          per-domain secrets.
+                        </div>
+                      </div>
+                      <label className="inline-flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="h-3 w-3"
+                          checked={webClientEnabledDraft}
+                          onChange={(e) =>
+                            setWebClientEnabledDraft(e.target.checked)
+                          }
+                        />
+                        <span className="text-[11px] text-slate-300">
+                          Enabled
+                        </span>
+                      </label>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="flex items-center justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="text-[11px] text-slate-300">
+                            Enforce domain whitelist
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            When enabled, HTTP requests are only allowed to
+                            domains listed below and marked as enabled.
+                          </div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          className="h-3 w-3"
+                          checked={webClientEnforceWhitelistDraft}
+                          onChange={(e) =>
+                            setWebClientEnforceWhitelistDraft(
+                              e.target.checked
+                            )
+                          }
+                        />
+                      </label>
+                      {!webClientEnforceWhitelistDraft && (
+                        <div className="text-[10px] text-amber-300">
+                          Warning: disabling the whitelist allows requests to
+                          any public domain (local network rules still apply).
+                          This reduces safety and should only be used when
+                          necessary.
+                        </div>
+                      )}
+                      <label className="flex items-center justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="text-[11px] text-slate-300">
+                            Allow local network (LAN) access
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            When disabled, requests to localhost and private IP
+                            ranges are blocked.
+                          </div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          className="h-3 w-3"
+                          checked={webClientAllowLocalNetworkDraft}
+                          onChange={(e) =>
+                            setWebClientAllowLocalNetworkDraft(
+                              e.target.checked
+                            )
+                          }
+                        />
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] uppercase tracking-wide text-slate-500">
+                        Domains and methods
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAddWebClientDomain}
+                        className="text-[11px] px-2 py-1 rounded-md border border-slate-700 hover:bg-slate-800"
+                      >
+                        + Add domain
+                      </button>
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      Domains are matched by hostname, for example
+                      <span className="ml-1 font-mono text-[10px]">
+                        example.com
+                      </span>
+                      {" "}or{" "}
+                      <span className="font-mono text-[10px]">
+                        api.example.com
+                      </span>
+                      . Paths and query strings are ignored.
+                    </div>
+                    {webClientDomainsDraft.length === 0 ? (
+                      <div className="text-[11px] text-slate-500">
+                        No domains configured yet. Add at least one domain to
+                        restrict access when whitelist enforcement is on.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {webClientDomainsDraft.map((domain, index) => (
+                          <div
+                            key={domain.id}
+                            className="border border-slate-800 rounded-md bg-slate-950/80 p-3 space-y-2"
+                          >
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  className="flex-1 bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
+                                  placeholder="Domain (e.g. api.example.com)"
+                                  value={domain.domain}
+                                  onChange={(e) =>
+                                    handleUpdateWebClientDomain(
+                                      domain.id,
+                                      (d) => ({
+                                        ...d,
+                                        domain: e.target.value,
+                                      })
+                                    )
+                                  }
+                                />
+                                <label className="inline-flex items-center gap-1">
+                                  <input
+                                    type="checkbox"
+                                    className="h-3 w-3"
+                                    checked={domain.enabled}
+                                    onChange={(e) =>
+                                      handleUpdateWebClientDomain(
+                                        domain.id,
+                                        (d) => ({
+                                          ...d,
+                                          enabled: e.target.checked,
+                                        })
+                                      )
+                                    }
+                                  />
+                                  <span className="text-[11px] text-slate-300">
+                                    Enabled
+                                  </span>
+                                </label>
+                                {domain.hasSecret && (
+                                  <span className="text-[10px] text-emerald-300 border border-emerald-700 rounded-md px-1 py-0.5">
+                                    Secret configured
+                                  </span>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleRemoveWebClientDomain(domain.id)
+                                  }
+                                  className="text-[10px] px-2 py-0.5 rounded-md border border-red-700 text-red-300 hover:bg-red-900/40"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                              <div className="flex items-center gap-2 text-[10px] text-slate-500">
+                                <span>Domain #{index + 1}</span>
+                              </div>
+                            </div>
+
+                            <div className="space-y-1">
+                              <div className="text-[10px] text-slate-500">
+                                Allowed HTTP methods
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {WEB_CLIENT_HTTP_METHODS.map((method) => {
+                                  const selected = domain.methods.includes(
+                                    method
+                                  );
+                                  return (
+                                    <button
+                                      key={`${domain.id}-${method}`}
+                                      type="button"
+                                      onClick={() =>
+                                        handleToggleWebClientDomainMethod(
+                                          domain.id,
+                                          method
+                                        )
+                                      }
+                                      className={`px-2 py-0.5 rounded-md text-[10px] border ${
+                                        selected
+                                          ? "border-sky-500 bg-sky-900/40 text-sky-100"
+                                          : "border-slate-700 text-slate-300 hover:bg-slate-800/60"
+                                      }`}
+                                    >
+                                      {method}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between">
+                                <div className="text-[10px] text-slate-500">
+                                  Secret (optional)
+                                </div>
+                                <label className="inline-flex items-center gap-1">
+                                  <input
+                                    type="checkbox"
+                                    className="h-3 w-3"
+                                    checked={domain.allowModelAccess}
+                                    onChange={(e) =>
+                                      handleUpdateWebClientDomain(
+                                        domain.id,
+                                        (d) => ({
+                                          ...d,
+                                          allowModelAccess: e.target.checked,
+                                        })
+                                      )
+                                    }
+                                  />
+                                  <span className="text-[10px] text-slate-300">
+                                    Allow HTTP tool to send this secret
+                                  </span>
+                                </label>
+                              </div>
+                              <div className="text-[10px] text-slate-500">
+                                Secrets are stored on the server and never
+                                shown in the UI or to the model. When allowed,
+                                the Web Client tool will send this value as an
+                                <span className="ml-1 font-mono">
+                                  Authorization: Bearer
+                                </span>{" "}
+                                header for matching domains.
+                              </div>
+                              <input
+                                type="password"
+                                className="w-full bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-[11px]"
+                                placeholder="New secret value (optional, will replace the stored secret when saved)"
+                                value={domain.secretInput}
+                                onChange={(e) =>
+                                  handleUpdateWebClientDomain(domain.id, (d) => ({
+                                    ...d,
+                                    secretInput: e.target.value,
+                                  }))
+                                }
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-800 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveWebClientSettings()}
+                      className="text-xs px-3 py-1.5 rounded-md border border-slate-700 hover:bg-slate-800"
+                    >
+                      Save Web Client settings
+                    </button>
                   </div>
                 </div>
               )}
