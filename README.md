@@ -18,8 +18,8 @@ Agentic multi-conversation AI chat app with tools, per-conversation scratchpad, 
   - `get_utc_time` backed by https://www.timeapi.io for precise UTC time.
   - `http_request` via the Web Client, enforcing per-user HTTP domain/method policies and optional secrets.
 - **Scratchpad UX**:
-  - Floating, draggable scratchpad widget that appears when the model uses the scratchpad.
-  - Per-response scratchpad icon and modal to inspect the latest scratchpad content.
+  - Scratchpad breakout viewer.
+  - Per-response scratchpad icon. Once clicked, the breakout viewer will open, allowing the user to inspect the latest scratchpad content.
 - **Prompt chain**:
   - Immutable base system prompt that defines Veilfire Chat behavior.
   - User-editable System / Planner / Reflector prompts per conversation.
